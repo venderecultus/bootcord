@@ -1,0 +1,63 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+    getServers: () => ipcRenderer.invoke('get-servers'),
+    getChannels: (guildId) => ipcRenderer.invoke('get-channels', guildId),
+    createInvite: (channelId) => ipcRenderer.invoke('create-invite', channelId),
+    getPins: (channelId) => ipcRenderer.invoke('get-pins', channelId),
+    getMessages: (channelId, before) => ipcRenderer.invoke('get-messages', channelId, before),
+    getMembers: (guildId) => ipcRenderer.invoke('get-members', guildId),
+    sendMessage: (channelId, content, filePath, replyToId) => ipcRenderer.invoke('send-message', channelId, content, filePath, replyToId),
+    saveTempAndSend: (channelId, content, arrayBuffer) => ipcRenderer.invoke('save-temp-and-send', channelId, content, arrayBuffer),
+    deleteMessage: (channelId, messageId) => ipcRenderer.invoke('delete-message', channelId, messageId),
+    editMessage: (channelId, messageId, content) => ipcRenderer.invoke('edit-message', channelId, messageId, content),
+    getGuildEmojis: (guildId) => ipcRenderer.invoke('get-guild-emojis', guildId),
+    selectFile: () => ipcRenderer.invoke('select-file'),
+    
+    joinVoice: (guildId, channelId) => ipcRenderer.invoke('join-voice', guildId, channelId),
+    leaveVoice: (guildId) => ipcRenderer.invoke('leave-voice', guildId),
+    setMute: (mute) => ipcRenderer.invoke('set-mute', mute),
+    setDeafen: (deaf) => ipcRenderer.invoke('set-deafen', deaf),
+    updateMicSettings: (volume, deviceId) => ipcRenderer.invoke('update-mic-settings', volume, deviceId),
+    setBotStatus: (status) => ipcRenderer.invoke('set-bot-status', status),
+
+    
+    getBotStatus: () => ipcRenderer.invoke('get-bot-status'),
+    getUserProfile: (userId, guildId) => ipcRenderer.invoke('get-user-profile', userId, guildId),
+    toggleReaction: (channelId, messageId, emoji) => ipcRenderer.invoke('toggle-reaction', channelId, messageId, emoji),
+    getCurrentUserId: () => ipcRenderer.invoke('get-current-user-id'),
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    runUpdate: () => ipcRenderer.invoke('run-update'),
+    getSavedGifs: () => ipcRenderer.invoke('get-saved-gifs'),
+    saveGifs: (gifs) => ipcRenderer.invoke('save-gifs', gifs),
+    resolveTenorUrl: (url) => ipcRenderer.invoke('resolve-tenor-url', url),
+    
+    onDiscordMessage: (callback) => ipcRenderer.on('discord-message', (_event, value) => callback(value)),
+    onVoiceStateUpdate: (callback) => ipcRenderer.on('voice-state-update', (_event, data) => callback(data)),
+    onPresenceUpdate: (callback) => ipcRenderer.on('presence-update', (_event, data) => callback(data)),
+    
+    // Audio Streaming
+    sendAudioData: (buffer) => ipcRenderer.send('audio-to-discord', buffer),
+    onAudioData: (callback) => ipcRenderer.on('audio-from-discord', (_event, data) => callback(data)),
+
+    openExternal: (url) => ipcRenderer.send('open-external', url),
+    updateSteamStatus: (url) => ipcRenderer.send('update-steam-status', url),
+    
+    submitToken: (token) => ipcRenderer.invoke('submit-token', token),
+    getEnvToken: () => ipcRenderer.invoke('get-env-token'),
+    changeToken: () => ipcRenderer.invoke('change-token'),
+    logout: () => ipcRenderer.invoke('logout'),
+
+
+    onNeedsLogin: (callback) => ipcRenderer.on('needs-login', (_event) => callback()),
+    
+    // Error notifications
+    onError: (callback) => ipcRenderer.on('app-error', (_event, data) => callback(data)),
+    
+    // Screen Share
+    startScreenShare: (textChannelId) => ipcRenderer.invoke('start-screen-share', textChannelId),
+    stopScreenShare: () => ipcRenderer.invoke('stop-screen-share'),
+    getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
+    sendScreenFrame: (frameData) => ipcRenderer.send('screenshare-frame', frameData),
+    onScreenShareViewerChange: (callback) => ipcRenderer.on('screenshare-viewer-change', (_event, count) => callback(count)),
+});

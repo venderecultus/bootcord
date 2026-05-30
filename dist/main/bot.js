@@ -1,0 +1,1199 @@
+import { Client, GatewayIntentBits, ChannelType, AttachmentBuilder, ActivityType, Partials, MessageType } from 'discord.js';
+import https from 'https';
+import { exec, spawn } from 'child_process';
+import ffmpeg from 'ffmpeg-static';
+import { app } from 'electron';
+import { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, createAudioPlayer, createAudioResource, AudioPlayerStatus, EndBehaviorType, StreamType, entersState } from '@discordjs/voice';
+import { Readable } from 'stream';
+import prism from 'prism-media';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import * as dotenv from 'dotenv';
+import { sendErrorNotification } from './index.js';
+dotenv.config();
+// Set FFMPEG path for prism-media
+// In production, electron-builder unpacks binaries to app.asar.unpacked
+let ffmpegPath = ffmpeg || '';
+if (app.isPackaged && typeof ffmpegPath === 'string' && ffmpegPath.includes('app.asar')) {
+    ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+}
+process.env.FFMPEG_PATH = ffmpegPath;
+console.log('[Bot] FFMPEG Path:', ffmpegPath);
+let clientIntents = [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessageReactions,
+];
+let clientPartials = [Partials.Message, Partials.Channel, Partials.Reaction];
+export let client = new Client({
+    intents: clientIntents,
+    partials: clientPartials,
+});
+function attachClientHandlers(c) {
+    c.once('ready', () => {
+        console.log(`[Bot] Logged in as ${c.user?.tag}! Ready to relay.`);
+    });
+    c.on('messageCreate', (message) => {
+        messageHandler(formatMessage(message));
+    });
+    c.on('messageUpdate', async (oldMsg, newMsg) => {
+        if (newMsg.partial) {
+            try {
+                await newMsg.fetch();
+            }
+            catch { }
+        }
+        messageHandler(formatMessage(newMsg));
+    });
+    c.on('messageReactionAdd', async (reaction) => {
+        try {
+            const ch = reaction.message.channel;
+            ch.messages.cache.delete(reaction.message.id);
+            const msg = await ch.messages.fetch(reaction.message.id);
+            messageHandler(formatMessage(msg));
+        }
+        catch (e) {
+            console.error('[Bot] Error handling messageReactionAdd:', e);
+        }
+    });
+    c.on('messageReactionRemove', async (reaction) => {
+        try {
+            const ch = reaction.message.channel;
+            ch.messages.cache.delete(reaction.message.id);
+            const msg = await ch.messages.fetch(reaction.message.id);
+            messageHandler(formatMessage(msg));
+        }
+        catch (e) {
+            console.error('[Bot] Error handling messageReactionRemove:', e);
+        }
+    });
+    c.on('messageDelete', (message) => {
+        messageHandler({ type: 'delete', id: message.id, channelId: message.channelId });
+    });
+    c.on('voiceStateUpdate', (oldState, newState) => {
+        const guildId = newState.guild.id || oldState.guild.id;
+        const updateData = {
+            guildId,
+            userId: newState.member?.id || oldState.member?.id,
+            oldChannelId: oldState.channelId,
+            newChannelId: newState.channelId,
+            member: newState.member ? {
+                id: newState.member.id,
+                username: newState.member.displayName,
+                avatar: newState.member.user.displayAvatarURL(),
+                mute: newState.member.voice.selfMute || newState.member.voice.serverMute,
+                deaf: newState.member.voice.selfDeaf || newState.member.voice.serverDeaf,
+                status: newState.member.presence?.status || 'offline',
+                activities: newState.member.presence?.activities.map(a => ({
+                    name: a.name,
+                    type: a.type,
+                    state: a.state,
+                    details: a.details
+                })) || []
+            } : null
+        };
+        voiceStateHandler(updateData);
+    });
+    c.on('presenceUpdate', (oldPresence, newPresence) => {
+        if (!newPresence || !newPresence.guild)
+            return;
+        const member = newPresence.member;
+        if (!member)
+            return;
+        const activities = newPresence.activities.map(a => ({
+            name: a.name,
+            type: a.type,
+            state: a.state,
+            details: a.details
+        }));
+        if (member.id === c.user?.id) {
+            selfActivities = activities;
+            selfStatus = newPresence.status || 'online';
+            console.log('[Presence] Self activity updated:', selfActivities.map(a => a.name).join(', ') || 'none');
+        }
+        presenceHandler({
+            guildId: newPresence.guild.id,
+            userId: member.id,
+            status: newPresence.status,
+            activities
+        });
+    });
+}
+// Initial attach
+attachClientHandlers(client);
+let messageHandler = () => { };
+let voiceStateHandler = () => { };
+let audioDataHandler = () => { };
+let activeAudioStream = null;
+let micProcess = null;
+const audioPlayer = createAudioPlayer();
+const __filename_bot = fileURLToPath(import.meta.url);
+const __dirname_bot = path.dirname(__filename_bot);
+// Global catch to prevent app hang on stream errors
+process.on('uncaughtException', (err) => {
+    if (err.message.includes('Premature close'))
+        return;
+    console.error('Uncaught Exception:', err);
+});
+let connection = null; // Store current voice connection
+let currentVoiceState = {
+    guildId: null,
+    channelId: null,
+    selfMute: false,
+    selfDeaf: false
+};
+let lastActiveChannelId = null;
+let lastActiveTextChannelId = null; // Store last used text channel
+let steamInterval = null;
+let gameInterval = null;
+let micSettings = {
+    volume: 1.0,
+    deviceId: 'default'
+};
+export function onMessage(handler) {
+    messageHandler = handler;
+}
+export function onVoiceStateUpdate(handler) {
+    voiceStateHandler = handler;
+}
+export function onAudioData(handler) {
+    audioDataHandler = handler;
+}
+client.once('ready', () => {
+    console.log(`Logged in as ${client.user?.tag}! Ready to relay.`);
+});
+// Track active streams per user to avoid duplicates
+const userStreams = new Map();
+function formatMessage(message) {
+    let referencedMessage = null;
+    if (message.reference && message.reference.messageId) {
+        // We try to use the cached message if available, otherwise just provide ID
+        const ref = message.mentions.repliedUser || message.referencedMessage;
+        referencedMessage = {
+            id: message.reference.messageId,
+            author: ref ? (ref.displayName || ref.username) : 'Unknown',
+            authorId: ref?.id,
+            content: message.referencedMessage?.content || ''
+        };
+    }
+    const systemContent = (() => {
+        switch (message.type) {
+            case MessageType.RecipientAdd: return `added <@${message.author.id}> to the join.`;
+            case MessageType.RecipientRemove: return `removed <@${message.author.id}> from the join.`;
+            case MessageType.ChannelNameChange: return `changed the channel name: **${message.content}**`;
+            case MessageType.ChannelIconChange: return `changed the channel icon.`;
+            case MessageType.ChannelPinnedMessage: return `pinned a message to this channel.`;
+            case MessageType.UserJoin: return `joined the server.`;
+            case MessageType.GuildBoost: return `boosted the server!`;
+            case MessageType.GuildBoostTier1: return `boosted the server (Tier 1)!`;
+            case MessageType.GuildBoostTier2: return `boosted the server (Tier 2)!`;
+            case MessageType.GuildBoostTier3: return `boosted the server (Tier 3)!`;
+            case MessageType.ThreadCreated: return `started a thread: **${message.content}**`;
+            case MessageType.AutoModerationAction: return `AutoModeration block.`;
+            default: return null;
+        }
+    })();
+    return {
+        id: message.id,
+        channelId: message.channelId,
+        guildId: message.guildId,
+        author: message.member?.displayName || message.author.username,
+        authorId: message.author.id,
+        isSelf: message.author.id === client.user?.id,
+        isMentioned: message.mentions.users.has(client.user?.id || '') || message.mentions.everyone,
+        content: (() => {
+            let c = message.content || '';
+            c = c.replace(/<@!?(\d+)>/g, (match, id) => {
+                const user = message.guild?.members.cache.get(id)?.displayName || message.client.users.cache.get(id)?.username;
+                return user ? `[[@${user}]]` : match;
+            });
+            c = c.replace(/<#(\d+)>/g, (match, id) => {
+                const channel = message.guild?.channels.cache.get(id)?.name;
+                return channel ? `[[#${channel}]]` : match;
+            });
+            c = c.replace(/<@&(\d+)>/g, (match, id) => {
+                const role = message.guild?.roles.cache.get(id)?.name;
+                return role ? `[[@${role}]]` : match;
+            });
+            return c;
+        })(),
+        avatar: message.author.displayAvatarURL(),
+        timestamp: message.createdAt.toLocaleTimeString(),
+        rawTimestamp: message.createdAt.toISOString(),
+        referencedMessage: message.reference && message.reference.messageId ? {
+            id: message.reference.messageId,
+            author: message.mentions.repliedUser?.displayName || 'User',
+            authorId: message.mentions.repliedUser?.id,
+            isMentioned: message.mentions.repliedUser?.id === client.user?.id,
+            content: '' // Don't mistakenly show current message content as reply content
+        } : null,
+        attachments: message.attachments.map(a => a.url),
+        reactions: Array.from(message.reactions.cache.values()).map(r => ({
+            emoji: r.emoji.id ? `<${r.emoji.animated ? 'a' : ''}:${r.emoji.name}:${r.emoji.id}>` : r.emoji.name,
+            name: r.emoji.name,
+            id: r.emoji.id,
+            count: r.count,
+            me: r.me
+        })),
+        embeds: message.embeds.map(e => ({
+            type: e.data.type,
+            url: e.url || e.data.url,
+            provider: e.provider ? e.provider.name : null,
+            image: e.image?.url,
+            thumbnail: e.thumbnail?.url,
+            video: e.video?.url
+        })),
+        systemContent,
+        type: message.type,
+        poll: message.poll ? {
+            question: message.poll.question.text,
+            answers: message.poll.answers.map((a) => ({
+                id: a.id,
+                text: a.text,
+                emoji: a.emoji?.name || a.emoji?.id,
+                votes: a.voteCount
+            })),
+            isEnded: message.poll.resultsFinalized
+        } : null
+    };
+}
+// Event listeners were moved to attachClientHandlers
+export async function toggleReaction(channelId, messageId, emoji) {
+    try {
+        const channel = client.channels.cache.get(channelId);
+        if (!channel?.isTextBased())
+            return;
+        const message = await channel.messages.fetch(messageId);
+        if (!message)
+            return;
+        // Parse ID out of <a:name:id> or <:name:id> if present
+        let searchId = emoji;
+        let searchName = emoji;
+        const customMatch = emoji.match(/<a?:(\w+):(\d+)>/);
+        if (customMatch) {
+            searchName = customMatch[1];
+            searchId = customMatch[2];
+        }
+        const reaction = message.reactions.cache.find(r => r.emoji.id === searchId || r.emoji.name === searchName);
+        if (reaction && reaction.me) {
+            await reaction.users.remove(client.user?.id);
+        }
+        else {
+            await message.react(emoji);
+        }
+        // Clear stale cache and force fresh fetch to ensure UI is in sync
+        channel.messages.cache.delete(messageId);
+        const updated = await channel.messages.fetch(messageId);
+        if (updated)
+            messageHandler(formatMessage(updated));
+    }
+    catch (e) {
+        console.error('[Bot] Toggle reaction error:', e);
+    }
+}
+export async function editMessage(channelId, messageId, content) {
+    try {
+        const channel = await client.channels.fetch(channelId);
+        if (channel && (channel.isTextBased() || channel.isThread())) {
+            const message = await channel.messages.fetch(messageId);
+            await message.edit(content);
+            return true;
+        }
+    }
+    catch (e) {
+        console.error('[Bot] Edit failed:', e);
+    }
+    return false;
+}
+let presenceHandler = () => { };
+export function onPresenceUpdate(handler) {
+    presenceHandler = handler;
+}
+// Store bot's own activities since discord.js doesn't reliably cache self-presence
+let selfActivities = [];
+let selfStatus = 'online';
+let steamDetectedGame = null;
+let steamUrl = '';
+let localDetectedGame = null;
+let currentBotStatus = 'online';
+export function setNotificationStatus(status) {
+    currentBotStatus = status;
+    updateBotPresence();
+}
+export function setSteamUrl(url) {
+    steamUrl = url;
+    checkSteamStatus();
+}
+function checkSteamStatus() {
+    if (!steamUrl || !steamUrl.startsWith('http')) {
+        steamDetectedGame = null;
+        updateBotPresence();
+        return;
+    }
+    https.get(steamUrl, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+            const isIngame = data.includes('profile_in_game_header">Currently In-Game') ||
+                data.includes('profile_in_game_header">В игре') ||
+                data.includes('profile_in_game_header">Currently In-Game');
+            if (isIngame) {
+                const matchName = data.match(/profile_in_game_name">([^<]+)/);
+                if (matchName) {
+                    steamDetectedGame = matchName[1].trim();
+                    console.log('[Steam] Detected game:', steamDetectedGame);
+                }
+                else {
+                    steamDetectedGame = null;
+                }
+            }
+            else {
+                steamDetectedGame = null;
+            }
+            updateBotPresence();
+        });
+    }).on('error', (e) => {
+        console.error('[Steam] Scrape error:', e.message);
+        steamDetectedGame = null;
+    });
+}
+const GAME_PROCESSES = {
+    'cs2.exe': 'Counter-Strike 2',
+    'dota2.exe': 'Dota 2',
+    'tslgame.exe': 'PUBG: BATTLEGROUNDS',
+    'r5apex.exe': 'Apex Legends',
+    'gta5.exe': 'Grand Theft Auto V',
+    'bg3.exe': 'Baldur\'s Gate 3',
+    'eldenring.exe': 'ELDEN RING',
+    'cyberpunk2077.exe': 'Cyberpunk 2077',
+    'rustclient.exe': 'Rust',
+    'terraria.exe': 'Terraria',
+    'helldivers2.exe': 'Helldivers 2',
+    'palword-win64-shipping.exe': 'Palworld',
+    'warframe.x64.exe': 'Warframe',
+    'destiny2.exe': 'Destiny 2',
+    'rainbowsix.exe': 'Rainbow Six Siege',
+    'stardew valley.exe': 'Stardew Valley',
+    'factorio.exe': 'Factorio',
+    'eurotrucks2.exe': 'Euro Truck Simulator 2',
+    'phasmophobia.exe': 'Phasmophobia',
+    'lethal company.exe': 'Lethal Company',
+    'fallout4.exe': 'Fallout 4',
+    'fallout76.exe': 'Fallout 76',
+    'starfield.exe': 'Starfield',
+    'civilizationvi.exe': 'Civilization VI',
+    'hoi4.exe': 'Hearts of Iron IV',
+    'eu4.exe': 'Europa Universalis IV',
+    'stellaris.exe': 'Stellaris',
+    'ck3.exe': 'Crusader Kings III',
+    'deadbydaylight-win64-shipping.exe': 'Dead by Daylight',
+    'vrchat.exe': 'VRChat',
+    'rimworldwin64.exe': 'RimWorld',
+    'witcher3.exe': 'The Witcher 3: Wild Hunt',
+    'monsterhunterworld.exe': 'Monster Hunter: World',
+    'monsterhunterrise.exe': 'Monster Hunter Rise',
+    'valheim.exe': 'Valheim',
+    'fsd-win64-shipping.exe': 'Deep Rock Galactic',
+    '7daystodie.exe': '7 Days to Die',
+    'dayz_x64.exe': 'DayZ',
+    'left4dead2.exe': 'Left 4 Dead 2',
+    'portal2.exe': 'Portal 2',
+    'forzahorizon5.exe': 'Forza Horizon 5',
+    'sotgame.exe': 'Sea of Thieves',
+    'nms.exe': 'No Man\'s Sky',
+    'subnautica.exe': 'Subnautica',
+    'ts4_x64.exe': 'The Sims 4',
+    'cities.exe': 'Cities: Skylines',
+    'cities2.exe': 'Cities: Skylines II',
+    'manorlords-win64-shipping.exe': 'Manor Lords',
+    'hades.exe': 'Hades',
+    'hades2.exe': 'Hades II',
+    'hollow knight.exe': 'Hollow Knight',
+    'slaythespire.exe': 'Slay the Spire',
+    'isaac-ng.exe': 'The Binding of Isaac: Rebirth',
+    'risk of rain 2.exe': 'Risk of Rain 2',
+    'deadcells.exe': 'Dead Cells',
+    'vampiresurvivors.exe': 'Vampire Survivors',
+    'balatro.exe': 'Balatro',
+    'content warning.exe': 'Content Warning',
+    'buckshot roulette.exe': 'Buckshot Roulette',
+    'readyornot-win64-shipping.exe': 'Ready or Not',
+    'escapefromtarkov.exe': 'Escape from Tarkov',
+    'leagueclient.exe': 'League of Legends',
+    'valorant-win64-shipping.exe': 'VALORANT',
+    'overwatch.exe': 'Overwatch 2',
+    'diablo iv.exe': 'Diablo IV',
+    'wow.exe': 'World of Warcraft',
+    'genshinimpact.exe': 'Genshin Impact',
+    'starrail.exe': 'Honkai: Star Rail',
+    'robloxplayerbeta.exe': 'Roblox',
+    'fortniteclient-win64-shipping.exe': 'Fortnite',
+    'flightsimulator.exe': 'Microsoft Flight Simulator',
+    'farmingsimulator2022.exe': 'Farming Simulator 22',
+    'snowrunner.exe': 'SnowRunner',
+    'factorygame-win64-shipping.exe': 'Satisfactory',
+    'projectzomboid64.exe': 'Project Zomboid',
+    'sonsoftheforest.exe': 'Sons of the Forest',
+    'theforest.exe': 'The Forest',
+    'gh.exe': 'Green Hell',
+    'stranded deep.exe': 'Stranded Deep',
+    'raft.exe': 'Raft',
+    'main-win64-shipping.exe': 'Grounded',
+    'arkascended.exe': 'ARK: Survival Ascended',
+    'warhammer3.exe': 'Total War: Warhammer III',
+    'taleworlds.mountandblade.launcher.exe': 'Mount & Blade II: Bannerlord',
+    'bannerlord.exe': 'Mount & Blade II: Bannerlord',
+    'victoria3.exe': 'Victoria 3',
+    'aoe2de_s.exe': 'Age of Empires II: DE',
+    'relicaoeiv.exe': 'Age of Empires IV',
+    'reliccoh3.exe': 'Company of Heroes 3',
+    'darktide.exe': 'Warhammer 40,000: Darktide',
+    'payday2_win32_release.exe': 'PAYDAY 2',
+    'payday3-win64-shipping.exe': 'PAYDAY 3',
+    'streetfighter6.exe': 'Street Fighter 6',
+    'tekken8-win64-shipping.exe': 'TEKKEN 8',
+    'mk12.exe': 'Mortal Kombat 1',
+    'dd2.exe': 'Dragon\'s Dogma 2',
+    'undertale.exe': 'Undertale',
+    'minecraft.exe': 'Minecraft',
+    'javaw.exe': 'Minecraft',
+    'hl2.exe': 'Half-Life 2'
+};
+function scanLocalGames() {
+    if (process.platform !== 'win32')
+        return;
+    exec('tasklist /FI "STATUS eq RUNNING" /FO CSV', (err, stdout) => {
+        if (err)
+            return;
+        const out = stdout.toLowerCase();
+        let found = null;
+        for (const [exe, name] of Object.entries(GAME_PROCESSES)) {
+            if (out.includes(exe.toLowerCase())) {
+                found = name;
+                break;
+            }
+        }
+        if (found !== localDetectedGame) {
+            localDetectedGame = found;
+            console.log('[Local] Game status changed:', localDetectedGame || 'none');
+            updateBotPresence();
+        }
+    });
+}
+function updateBotPresence() {
+    if (!client.user)
+        return;
+    const game = steamDetectedGame || localDetectedGame;
+    const status = currentBotStatus; // online, idle, dnd, invisible
+    selfStatus = status;
+    if (game) {
+        client.user.setPresence({
+            activities: [{ name: game, type: ActivityType.Playing }],
+            status: status
+        });
+    }
+    else {
+        client.user.setPresence({
+            activities: [],
+            status: status
+        });
+    }
+}
+export function startPresenceScans() {
+    stopPresenceScans();
+    steamInterval = setInterval(checkSteamStatus, 60000);
+    gameInterval = setInterval(scanLocalGames, 20000);
+    console.log('[Bot] Presence scans started.');
+}
+export function stopPresenceScans() {
+    if (steamInterval)
+        clearInterval(steamInterval);
+    if (gameInterval)
+        clearInterval(gameInterval);
+    steamInterval = null;
+    gameInterval = null;
+    console.log('[Bot] Presence scans stopped.');
+}
+// Initial start (will be re-started on login)
+startPresenceScans();
+// Event listeners were moved to attachClientHandlers
+export async function getMessageHistory(channelId, before) {
+    try {
+        const channel = await client.channels.fetch(channelId);
+        if (!channel || !channel.isTextBased())
+            return [];
+        const options = { limit: 100 };
+        if (before)
+            options.before = before;
+        const messages = await channel.messages.fetch(options);
+        return [...messages.values()].reverse().map(m => formatMessage(m));
+    }
+    catch (e) {
+        console.error('[Bot] Failed to get message history:', e);
+        return [];
+    }
+}
+export async function sendMessage(channelId, content, filePath, replyToId) {
+    const channel = await client.channels.fetch(channelId);
+    if (channel?.isTextBased()) {
+        lastActiveTextChannelId = channelId; // Save last used text channel
+        const options = {};
+        if (content)
+            options.content = content;
+        if (filePath) {
+            options.files = [new AttachmentBuilder(filePath)];
+        }
+        if (replyToId) {
+            options.reply = { messageReference: replyToId, failIfNotExists: false };
+        }
+        const sent = await channel.send(options);
+        return formatMessage(sent);
+    }
+    return null;
+}
+export async function deleteMessage(channelId, messageId) {
+    try {
+        const channel = await client.channels.fetch(channelId);
+        if (channel?.isTextBased()) {
+            const message = await channel.messages.fetch(messageId);
+            if (message && message.deletable) {
+                await message.delete();
+                return true;
+            }
+        }
+    }
+    catch (e) {
+        console.error('Failed to delete message:', e);
+    }
+    return false;
+}
+export async function getServers() {
+    return client.guilds.cache.map(g => ({
+        id: g.id,
+        name: g.name,
+        icon: g.iconURL({ size: 128 })
+    }));
+}
+export async function getPins(channelId) {
+    try {
+        const channel = await client.channels.fetch(channelId);
+        if (channel && channel.isTextBased()) {
+            const pins = await channel.messages.fetchPinned();
+            return pins.map((m) => formatMessage(m));
+        }
+    }
+    catch (e) {
+        console.error('[Bot] Failed to fetch pins:', e);
+    }
+    return [];
+}
+export async function createInvite(channelId) {
+    try {
+        const channel = await client.channels.fetch(channelId);
+        if (channel && (channel.isTextBased() || channel.type === ChannelType.GuildVoice)) {
+            const invite = await channel.createInvite({
+                maxAge: 0,
+                maxUses: 0,
+                unique: false
+            });
+            return invite.url;
+        }
+    }
+    catch (e) {
+        console.error('[Bot] Failed to create invite:', e);
+    }
+    return null;
+}
+export async function getChannels(guildId) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild)
+        return [];
+    try {
+        const channels = await guild.channels.fetch();
+        const sorted = [...channels.values()]
+            .filter(c => c && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildVoice || c.type === ChannelType.GuildCategory))
+            .sort((a, b) => (a?.position || 0) - (b?.position || 0));
+        return sorted.map(c => ({
+            id: c?.id,
+            name: c?.name,
+            type: c?.type,
+            parentId: c?.parentId || null,
+            voiceMembers: c?.type === ChannelType.GuildVoice ?
+                c.members.map((m) => ({
+                    id: m.id,
+                    name: m.displayName,
+                    avatar: m.user.displayAvatarURL(),
+                    mute: m.voice.selfMute || m.voice.serverMute,
+                    deaf: m.voice.selfDeaf || m.voice.serverDeaf,
+                    status: m.presence?.status || 'offline',
+                    activities: m.presence?.activities.map((a) => ({
+                        name: a.name,
+                        type: a.type,
+                        state: a.state,
+                        details: a.details
+                    })) || []
+                })) : []
+        }));
+    }
+    catch (e) {
+        console.error('[Bot] Failed to get channels:', e);
+        return [];
+    }
+}
+export async function getGuildMembers(guildId) {
+    try {
+        const guild = await client.guilds.fetch(guildId);
+        const members = await guild.members.fetch();
+        // Map members with roles and colors
+        const memberList = Array.from(members.values()).map(m => {
+            const hoistRole = m.roles.hoist;
+            return {
+                id: m.id,
+                name: m.displayName,
+                avatar: m.user.displayAvatarURL(),
+                status: m.presence?.status || 'offline',
+                activities: m.presence?.activities.map(a => ({
+                    name: a.name,
+                    type: a.type,
+                    state: a.state,
+                    details: a.details
+                })) || [],
+                color: m.displayHexColor !== '#000000' ? m.displayHexColor : '#949ba4',
+                hoistRoleId: hoistRole?.id || null,
+                hoistRoleName: hoistRole?.name || null,
+                hoistRolePosition: hoistRole?.position || 0
+            };
+        });
+        // Also get roles info for sections
+        const roles = Array.from(guild.roles.cache.values())
+            .filter(r => r.hoist)
+            .sort((a, b) => b.position - a.position)
+            .map(r => ({ id: r.id, name: r.name, position: r.position }));
+        return { members: memberList, roles };
+    }
+    catch (e) {
+        console.warn('[Bot] Failed to fetch guild members:', e.message);
+        return { members: [], roles: [] };
+    }
+}
+export async function getGuildEmojis(guildId) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild)
+        return [];
+    try {
+        const emojis = await guild.emojis.fetch();
+        return emojis.map(e => ({
+            id: e.id,
+            name: e.name,
+            animated: e.animated,
+            url: e.url
+        }));
+    }
+    catch (e) {
+        console.error('[Bot] Failed to fetch guild emojis:', e);
+        return [];
+    }
+}
+export async function updateVoiceConnection() {
+    if (!currentVoiceState.guildId || !currentVoiceState.channelId)
+        return;
+    const guild = client.guilds.cache.get(currentVoiceState.guildId);
+    if (!guild)
+        return;
+    const isChannelSwitch = lastActiveChannelId !== currentVoiceState.channelId;
+    lastActiveChannelId = currentVoiceState.channelId;
+    connection = joinVoiceChannel({
+        channelId: currentVoiceState.channelId,
+        guildId: currentVoiceState.guildId,
+        adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: currentVoiceState.selfDeaf,
+        selfMute: currentVoiceState.selfMute,
+    });
+    try {
+        await entersState(connection, VoiceConnectionStatus.Ready, 5000);
+        if (isChannelSwitch)
+            console.log(`Joined channel: ${currentVoiceState.channelId}`);
+    }
+    catch (e) {
+        console.error('[Bot] Voice Connection failed to reach Ready state within 5s:', e);
+    }
+    const playerIdle = audioPlayer.state.status === AudioPlayerStatus.Idle || audioPlayer.state.status === 'autopaused';
+    const needsOutgoingReset = isChannelSwitch || !activeAudioStream || activeAudioStream.destroyed || (playerIdle && !currentVoiceState.selfMute);
+    if (needsOutgoingReset) {
+        if (activeAudioStream) {
+            try {
+                activeAudioStream.destroy();
+            }
+            catch (e) { }
+            activeAudioStream = null;
+        }
+        activeAudioStream = new Readable({
+            read() {
+                // Keep the stream alive with minimal silence if muted to prevent Idle state
+                if (currentVoiceState.selfMute) {
+                    this.push(Buffer.alloc(960 * 2 * 2)); // 20ms of stereo 16-bit silence
+                }
+            }
+        });
+        activeAudioStream.on('error', (err) => {
+            if (err.code === 'ERR_STREAM_PREMATURE_CLOSE')
+                return;
+            console.warn('Audio stream error silenced:', err.message);
+        });
+        const resource = createAudioResource(activeAudioStream, {
+            inputType: StreamType.Raw
+        });
+        audioPlayer.play(resource);
+        connection.subscribe(audioPlayer);
+    }
+    if (isChannelSwitch) {
+        // Listen to others - Only reset if we switched channels
+        connection.receiver.speaking.removeAllListeners('start');
+        for (const userId of userStreams.keys()) {
+            cleanupUserStream(userId);
+        }
+        connection.receiver.speaking.on('start', (userId) => {
+            if (userStreams.has(userId))
+                return;
+            console.log(`User ${userId} started speaking, setting up stream...`);
+            const receiverStream = connection.receiver.subscribe(userId, {
+                end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 }
+            });
+            const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+            receiverStream.on('error', (err) => {
+                console.log(`Receiver Stream Error (${userId}):`, err.message);
+                cleanupUserStream(userId);
+            });
+            decoder.on('error', (err) => {
+                console.log(`Decoder Stream Error (${userId}):`, err.message);
+                cleanupUserStream(userId);
+            });
+            receiverStream.on('end', () => {
+                cleanupUserStream(userId);
+            });
+            userStreams.set(userId, { receiver: receiverStream, decoder });
+            receiverStream.pipe(decoder).on('data', (chunk) => {
+                audioDataHandler({ userId, buffer: chunk });
+            });
+        });
+    }
+    // Always check mic process (it handles selfMute internally)
+    startPythonMic();
+}
+function startPythonMic() {
+    if (!currentVoiceState.channelId) {
+        stopPythonMic();
+        return;
+    }
+    if (micProcess)
+        return; // already running!
+    console.log(`Spawning Python mic process (Vol: ${micSettings.volume}, Dev: ${micSettings.deviceId})...`);
+    // In production, mic.py is an extraResource (placed in resources folder)
+    const micScriptPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'mic.py')
+        : path.join(__dirname_bot, '../../mic.py');
+    // Pass volume and device ID (if not default)
+    const args = [micScriptPath, '--volume', micSettings.volume.toString()];
+    if (micSettings.deviceId && micSettings.deviceId !== 'default') {
+        args.push('--device', micSettings.deviceId);
+    }
+    micProcess = spawn('python', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    micProcess.stdout?.on('data', (chunk) => {
+        if (currentVoiceState.selfMute)
+            return;
+        if (activeAudioStream && !activeAudioStream.destroyed) {
+            activeAudioStream.push(chunk);
+        }
+    });
+    micProcess.stderr?.on('data', (data) => {
+        const message = data.toString().trim();
+        console.log(`[Python Mic Log]: ${message}`);
+        // Check for common microphone errors
+        if (message.toLowerCase().includes('error') || message.toLowerCase().includes('failed')) {
+            sendErrorNotification('Microphone Issues', message, 'microphone');
+        }
+    });
+    micProcess.on('error', (error) => {
+        console.error('[Python Mic Error]:', error);
+        sendErrorNotification('Microphone Issues', error.message || String(error), 'microphone');
+    });
+    micProcess.on('close', (code) => {
+        console.log(`Python mic process exited with code ${code}`);
+        if (micProcess) {
+            // Unexpected exit, clear and auto-restart if still in a channel
+            micProcess = null;
+            if (currentVoiceState.channelId) {
+                console.log('Restarting mic process in 2 seconds...');
+                setTimeout(startPythonMic, 2000);
+            }
+        }
+    });
+}
+function stopPythonMic() {
+    if (micProcess) {
+        console.log('Stopping Python mic process...');
+        micProcess.kill();
+        micProcess = null;
+    }
+}
+function cleanupUserStream(userId) {
+    const streamInfo = userStreams.get(userId);
+    if (streamInfo) {
+        console.log(`Cleaning up stream for user ${userId}`);
+        try {
+            streamInfo.decoder.destroy();
+            streamInfo.receiver.destroy();
+        }
+        catch (e) { }
+        userStreams.delete(userId);
+    }
+}
+const appIconCache = new Map();
+async function getApplicationIcon(appId) {
+    if (!appId)
+        return null;
+    if (appIconCache.has(appId))
+        return appIconCache.get(appId);
+    try {
+        const res = await fetch(`https://discord.com/api/v10/applications/${appId}/rpc`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.icon) {
+                const url = `https://cdn.discordapp.com/app-icons/${appId}/${data.icon}.png`;
+                appIconCache.set(appId, url);
+                return url;
+            }
+        }
+        appIconCache.set(appId, null);
+    }
+    catch {
+        appIconCache.set(appId, null);
+    }
+    return null;
+}
+export async function getUserProfile(userId, guildId) {
+    try {
+        const user = await client.users.fetch(userId, { force: true });
+        let member = null;
+        if (guildId) {
+            const guild = await client.guilds.fetch(guildId).catch(() => null);
+            if (guild)
+                member = await guild.members.fetch(userId).catch(() => null);
+        }
+        // Safe banner: only valid power-of-2 sizes are accepted by discord.js
+        let banner = null;
+        try {
+            if (typeof user.bannerURL === 'function') {
+                banner = user.bannerURL({ size: 512 }) ?? null;
+            }
+        }
+        catch {
+            banner = null;
+        }
+        return {
+            id: user.id,
+            username: user.username,
+            globalName: user.globalName || user.username,
+            avatar: user.displayAvatarURL({ size: 256 }),
+            hexAccentColor: user.hexAccentColor ?? null,
+            banner,
+            bot: user.bot,
+            status: member?.presence?.status || 'offline',
+            activities: await Promise.all((member?.presence?.activities ?? []).map(async (a) => ({
+                name: a.name,
+                type: a.type,
+                state: a.state,
+                details: a.details,
+                applicationId: a.applicationId,
+                applicationIcon: a.applicationId ? await getApplicationIcon(a.applicationId) : null,
+                assets: a.assets ? {
+                    largeImage: (() => { try {
+                        return a.assets.largeImageURL({ size: 256 }) || a.assets.largeImageURL({ extension: 'png' });
+                    }
+                    catch {
+                        return null;
+                    } })(),
+                    smallImage: (() => { try {
+                        return a.assets.smallImageURL({ size: 128 }) || a.assets.smallImageURL({ extension: 'png' });
+                    }
+                    catch {
+                        return null;
+                    } })(),
+                    largeText: a.assets.largeText,
+                    smallText: a.assets.smallText
+                } : null,
+                emoji: a.emoji
+            }))),
+            roles: Array.from((member?.roles.cache?.values() ?? []))
+                .filter((r) => r.name !== '@everyone')
+                .map((r) => ({ name: r.name, color: r.hexColor }))
+        };
+    }
+    catch (e) {
+        console.error('Fetch profile error:', e);
+        // Return minimal profile using cached guild member data if available
+        try {
+            const allGuilds = client.guilds.cache;
+            for (const guild of allGuilds.values()) {
+                const m = guild.members.cache.get(userId);
+                if (m) {
+                    return {
+                        id: m.id,
+                        username: m.user.username,
+                        globalName: m.user.globalName || m.displayName,
+                        avatar: m.user.displayAvatarURL({ size: 256 }),
+                        hexAccentColor: null,
+                        banner: null,
+                        bot: m.user.bot,
+                        status: m.presence?.status || 'offline',
+                        activities: (m.presence?.activities ?? []).map((a) => ({
+                            name: a.name, type: a.type, state: a.state, details: a.details, assets: null, emoji: a.emoji
+                        })),
+                        roles: Array.from(m.roles.cache.values())
+                            .filter((r) => r.name !== '@everyone')
+                            .map((r) => ({ name: r.name, color: r.hexColor }))
+                    };
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+}
+export function injectAudioChunk(buffer) {
+    // We now use Python mic, so we ignore manual injections from renderer to avoid double audio
+    // but we keep the function for backward compatibility if needed.
+    /*
+    if (activeAudioStream && !activeAudioStream.destroyed) {
+        const nodeBuffer = Buffer.from(new Uint8Array(buffer));
+        activeAudioStream.push(nodeBuffer);
+    }
+    */
+}
+export async function joinVoice(guildId, channelId) {
+    try {
+        // Leave existing voice connection if any
+        if (connection) {
+            console.log(`[Bot] Destroying existing connection before join.`);
+            try {
+                if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                    connection.destroy();
+                }
+            }
+            catch (e) {
+                console.error('[Bot] Error destroying connection:', e);
+            }
+            connection = null;
+        }
+        // Force cleanup of streams before switching
+        for (const userId of userStreams.keys()) {
+            cleanupUserStream(userId);
+        }
+        currentVoiceState.guildId = guildId;
+        currentVoiceState.channelId = channelId;
+        // Force outgoing stream reset on join
+        if (activeAudioStream) {
+            try {
+                activeAudioStream?.destroy();
+            }
+            catch (e) { }
+            activeAudioStream = null;
+        }
+        await updateVoiceConnection();
+        return { status: 'Connected' };
+    }
+    catch (error) {
+        console.error('[Bot] Error joining voice:', error);
+        sendErrorNotification('Voice Channel Issues', error.message || String(error), 'voice');
+        throw error;
+    }
+}
+export function leaveVoice(guildId) {
+    const targetGuildId = guildId || currentVoiceState.guildId;
+    if (activeAudioStream) {
+        activeAudioStream.destroy();
+        activeAudioStream = null;
+    }
+    stopPythonMic();
+    if (targetGuildId) {
+        const connection = getVoiceConnection(targetGuildId);
+        if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
+            try {
+                connection.destroy();
+            }
+            catch (e) {
+                console.error('[Bot] Error destroying connection:', e);
+            }
+            currentVoiceState.guildId = null;
+            currentVoiceState.channelId = null;
+            return { status: 'Disconnected' };
+        }
+    }
+    // Fallback cleanup
+    const allGuilds = client.guilds.cache.keys();
+    for (const gid of allGuilds) {
+        const conn = getVoiceConnection(gid);
+        if (conn && conn.state.status !== VoiceConnectionStatus.Destroyed) {
+            try {
+                conn.destroy();
+            }
+            catch (e) {
+                console.error('[Bot] Error destroying connection:', e);
+            }
+            currentVoiceState.guildId = null;
+            currentVoiceState.channelId = null;
+            stopPythonMic();
+        }
+    }
+    return { status: 'Disconnected' };
+}
+export function setMute(mute) {
+    currentVoiceState.selfMute = mute;
+    updateVoiceConnection();
+}
+export function setDeafen(deaf) {
+    currentVoiceState.selfDeaf = deaf;
+    if (deaf)
+        currentVoiceState.selfMute = true;
+    updateVoiceConnection();
+}
+export function updateMicSettings(volume, deviceId) {
+    const volChanged = micSettings.volume !== volume;
+    const deviceChanged = micSettings.deviceId !== deviceId;
+    micSettings.volume = volume;
+    micSettings.deviceId = deviceId;
+    if (micProcess) {
+        if (deviceChanged) {
+            stopPythonMic();
+            startPythonMic(); // Must restart to change hardware device
+        }
+        else if (volChanged) {
+            // Live update volume via stdin
+            micProcess.stdin?.write(volume.toString() + '\n');
+        }
+    }
+}
+export function getBotData() {
+    if (!client.user)
+        return null;
+    // Try to get presence from guild member cache
+    let activities = [...selfActivities];
+    let status = selfStatus;
+    const externalGame = steamDetectedGame || localDetectedGame;
+    if (externalGame && !activities.find(a => a.name === externalGame)) {
+        activities.unshift({ name: externalGame, type: 0 });
+    }
+    return {
+        tag: client.user.tag,
+        avatar: client.user.displayAvatarURL(),
+        status,
+        activities
+    };
+}
+export async function loginBot(manualToken) {
+    // Reload env just in case it changed while app was running
+    dotenv.config({ override: true });
+    const token = manualToken || process.env.DISCORD_TOKEN;
+    if (!token)
+        throw new Error('No token provided and DISCORD_TOKEN not found in .env');
+    console.log(`[Bot] Attempting login with token: ${token.substring(0, 10)}...`);
+    // If client is already initialized and logged in, we destroy it to start fresh
+    if (client.isReady()) {
+        console.log('[Bot] Destroying existing client for fresh login...');
+        client.destroy();
+        client = new Client({
+            intents: clientIntents,
+            partials: clientPartials,
+        });
+        attachClientHandlers(client);
+    }
+    try {
+        stopPresenceScans();
+        await client.login(token);
+        // Once logged in, ensure we have initial state
+        if (client.user) {
+            selfStatus = 'online';
+            selfActivities = [];
+            console.log(`[Bot] Successfully logged in as ${client.user.tag}`);
+            startPresenceScans();
+        }
+    }
+    catch (e) {
+        console.error('[Bot] Login failed:', e.message);
+        throw e;
+    }
+}
+// Screen Share functions
+export function getCurrentVoiceChannelId() {
+    return currentVoiceState.channelId;
+}
+export async function sendScreenShareLink(channelId, url) {
+    try {
+        console.log(`[Bot] sendScreenShareLink called with voice channelId: ${channelId}`);
+        // Get the voice channel
+        const voiceChannel = await client.channels.fetch(channelId);
+        const channelName = voiceChannel && 'name' in voiceChannel ? voiceChannel.name : 'Unknown';
+        console.log(`[Bot] Fetched voice channel:`, channelName, voiceChannel?.type);
+        if (!voiceChannel || !voiceChannel.isVoiceBased()) {
+            console.error('[Bot] Channel is not a voice channel');
+            return null;
+        }
+        // Find a text channel in the same guild
+        const guild = voiceChannel.guild;
+        if (!guild) {
+            console.error('[Bot] No guild found');
+            return null;
+        }
+        console.log(`[Bot] Guild: ${guild.name}, searching for first available text channel...`);
+        // Find the first text channel where bot can send messages
+        const textChannel = guild.channels.cache.find(ch => {
+            if (!ch.isTextBased())
+                return false;
+            // Check if bot has permission to send messages
+            const permissions = ch.permissionsFor(client.user);
+            return permissions && permissions.has('SendMessages');
+        });
+        if (textChannel && 'send' in textChannel && typeof textChannel.send === 'function') {
+            const sendChannelName = 'name' in textChannel ? textChannel.name : 'Unknown';
+            console.log(`[Bot] Sending message to first available text channel: ${sendChannelName}`);
+            const message = await textChannel.send(`🖥️ **Screen Share Started**\nWatch here: ${url}`);
+            console.log('[Bot] Screen share link sent successfully');
+            return message;
+        }
+        console.error('[Bot] No suitable text channel found in guild');
+        return null;
+    }
+    catch (error) {
+        console.error('[Bot] Failed to send screen share link:', error);
+        return null;
+    }
+}
+export async function sendScreenShareLinkToChannel(textChannelId, url) {
+    try {
+        console.log(`[Bot] sendScreenShareLinkToChannel called with channelId: ${textChannelId}`);
+        const channel = await client.channels.fetch(textChannelId);
+        if (!channel) {
+            console.error('[Bot] Channel not found');
+            return null;
+        }
+        const channelName = 'name' in channel ? channel.name : 'Unknown';
+        console.log(`[Bot] Fetched channel: ${channelName}, type: ${channel.type}`);
+        if ('send' in channel && typeof channel.send === 'function') {
+            console.log(`[Bot] Sending screen share link to ${channelName}`);
+            const message = await channel.send(`🖥️ **Screen Share Started**\nWatch here: ${url}`);
+            console.log('[Bot] Screen share link sent successfully');
+            return message;
+        }
+        console.error('[Bot] Channel does not support sending messages');
+        return null;
+    }
+    catch (error) {
+        console.error('[Bot] Failed to send screen share link:', error);
+        return null;
+    }
+}
+//# sourceMappingURL=bot.js.map

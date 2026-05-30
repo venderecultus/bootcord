@@ -1,0 +1,4 @@
+node_modules/
+.opencode/
+.env
+bootcord3.zip
