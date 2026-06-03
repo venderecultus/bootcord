@@ -15,36 +15,94 @@ except ImportError:
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=str, default=None, help="Device name or index")
 parser.add_argument("--volume", type=float, default=1.0, help="Mic gain multiplier")
+parser.add_argument("--noise-suppression", type=int, default=0, choices=[0, 1], help="Enable noise suppression")
 args = parser.parse_args()
 
 # Global volume multiplier (can be updated via stdin)
 vol_multiplier = args.volume
+noise_suppression_enabled = bool(args.noise_suppression)
 
 # Discord settings
 CHUNK_SIZE = 960  # 20ms at 48kHz
 RATE = 48000
 
+class NoiseSuppressor:
+    def __init__(self, rate=RATE):
+        self.rate = rate
+        self.fft_size = 1024
+        self.hop_size = CHUNK_SIZE
+        self.hann = np.hanning(self.fft_size)
+        self.noise_floor = np.zeros(self.fft_size // 2 + 1)
+        self.ring_buffer = np.zeros(self.fft_size)
+        self.alpha = 0.92
+        self.over_subtraction = 1.8
+        self.spectral_floor = 0.02
+        self.frame_count = 0
+        self.noise_init_frames = 30
+
+    def process(self, samples):
+        output = np.zeros(self.hop_size)
+        self.ring_buffer[:-self.hop_size] = self.ring_buffer[self.hop_size:]
+        self.ring_buffer[-self.hop_size:] = samples
+        windowed = self.ring_buffer * self.hann
+        fft = np.fft.rfft(windowed)
+        mag = np.abs(fft)
+        phase = np.angle(fft)
+        if self.frame_count < self.noise_init_frames:
+            self.noise_floor = self.alpha * self.noise_floor + (1 - self.alpha) * mag
+            self.frame_count += 1
+            return samples
+        speech_energy = np.sum(mag ** 2)
+        noise_energy = np.sum(self.noise_floor ** 2)
+        if speech_energy < noise_energy * 1.5:
+            self.noise_floor = self.alpha * self.noise_floor + (1 - self.alpha) * mag
+        mag_sq = mag ** 2
+        noise_sq = self.noise_floor ** 2
+        gain = np.maximum(0, (mag_sq - self.over_subtraction * noise_sq) / (mag_sq + 1e-10))
+        gain = np.maximum(gain, self.spectral_floor)
+        fft_filtered = fft * gain
+        reconstructed = np.fft.irfft(fft_filtered)
+        np.copyto(output, reconstructed[-self.hop_size:])
+        return output
+
+ns = NoiseSuppressor()
+
 # Minimal processing: Just scale and convert
 def process_audio(indata):
-    # Apply gain & scale to Int16
+    global noise_suppression_enabled
+    if noise_suppression_enabled:
+        indata_float = indata.astype(np.float32) / 32768.0
+        indata_float = ns.process(indata_float)
+        indata = (indata_float * 32767.0).astype(np.int16)
     processed = (indata * vol_multiplier).astype(np.int16)
-    # 3. Interleave Mono to Stereo (Discord Requirement)
     stereo = np.repeat(processed, 2)
     return stereo.tobytes()
 
 def stdin_listener():
-    global vol_multiplier
+    global vol_multiplier, noise_suppression_enabled
     while True:
         line = sys.stdin.readline()
         if not line:
             break
-        try:
-            val = float(line.strip())
-            vol_multiplier = val
-            sys.stderr.write(f"Python Mic: Volume updated to {vol_multiplier}\n")
-            sys.stderr.flush()
-        except:
-            pass
+        line = line.strip()
+        if line.startswith("noise_suppression:"):
+            try:
+                val = int(line.split(":", 1)[1])
+                noise_suppression_enabled = bool(val)
+                if noise_suppression_enabled:
+                    ns.__init__()
+                sys.stderr.write(f"Python Mic: Noise suppression {'enabled' if noise_suppression_enabled else 'disabled'}\n")
+                sys.stderr.flush()
+            except:
+                pass
+        else:
+            try:
+                val = float(line)
+                vol_multiplier = val
+                sys.stderr.write(f"Python Mic: Volume updated to {vol_multiplier}\n")
+                sys.stderr.flush()
+            except:
+                pass
 
 def callback(indata, frames, time, status):
     if status:

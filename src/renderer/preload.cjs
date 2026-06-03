@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setMute: (mute) => ipcRenderer.invoke('set-mute', mute),
     setDeafen: (deaf) => ipcRenderer.invoke('set-deafen', deaf),
     updateMicSettings: (volume, deviceId) => ipcRenderer.invoke('update-mic-settings', volume, deviceId),
+    setNoiseSuppression: (enabled) => ipcRenderer.invoke('set-noise-suppression', enabled),
     setBotStatus: (status) => ipcRenderer.invoke('set-bot-status', status),
 
     
@@ -27,7 +28,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     toggleReaction: (channelId, messageId, emoji) => ipcRenderer.invoke('toggle-reaction', channelId, messageId, emoji),
     getCurrentUserId: () => ipcRenderer.invoke('get-current-user-id'),
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-    runUpdate: () => ipcRenderer.invoke('run-update'),
+    downloadUpdate: () => ipcRenderer.invoke('download-update'),
+    installUpdate: () => ipcRenderer.invoke('install-update'),
+    onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (_event, version) => callback(version)),
+    onUpdateNotAvailable: (callback) => ipcRenderer.on('update-not-available', () => callback()),
+    onUpdateProgress: (callback) => ipcRenderer.on('update-progress', (_event, percent) => callback(percent)),
+    onUpdateDownloaded: (callback) => ipcRenderer.on('update-downloaded', () => callback()),
     getSavedGifs: () => ipcRenderer.invoke('get-saved-gifs'),
     saveGifs: (gifs) => ipcRenderer.invoke('save-gifs', gifs),
     resolveTenorUrl: (url) => ipcRenderer.invoke('resolve-tenor-url', url),
@@ -40,6 +46,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     sendAudioData: (buffer) => ipcRenderer.send('audio-to-discord', buffer),
     onAudioData: (callback) => ipcRenderer.on('audio-from-discord', (_event, data) => callback(data)),
 
+    setLaunchOnStartup: (enabled) => ipcRenderer.invoke('set-launch-on-startup', enabled),
+    setGameDetection: (enabled) => ipcRenderer.invoke('set-game-detection', enabled),
+
     openExternal: (url) => ipcRenderer.send('open-external', url),
     updateSteamStatus: (url) => ipcRenderer.send('update-steam-status', url),
     
@@ -49,15 +58,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     logout: () => ipcRenderer.invoke('logout'),
 
 
+    minimizeWindow: () => ipcRenderer.send('window-minimize'),
+    toggleMaximizeWindow: () => ipcRenderer.send('window-maximize-toggle'),
+    closeWindow: () => ipcRenderer.send('window-close'),
+    onWindowStateChanged: (callback) => ipcRenderer.on('window-state-changed', (_event, isMaximized) => callback(isMaximized)),
+
     onNeedsLogin: (callback) => ipcRenderer.on('needs-login', (_event) => callback()),
     
     // Error notifications
     onError: (callback) => ipcRenderer.on('app-error', (_event, data) => callback(data)),
     
     // Screen Share
-    startScreenShare: (textChannelId) => ipcRenderer.invoke('start-screen-share', textChannelId),
+    startScreenShare: (textChannelId, sourceId, sourceName) => ipcRenderer.invoke('start-screen-share', textChannelId, sourceId, sourceName),
     stopScreenShare: () => ipcRenderer.invoke('stop-screen-share'),
     getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
-    sendScreenFrame: (frameData) => ipcRenderer.send('screenshare-frame', frameData),
-    onScreenShareViewerChange: (callback) => ipcRenderer.on('screenshare-viewer-change', (_event, count) => callback(count)),
+    onScreenShareDisconnect: (callback) => ipcRenderer.on('screenshare-disconnect', () => callback()),
 });

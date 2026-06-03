@@ -1,9 +1,11 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, desktopCapturer } from 'electron';
-import { exec } from 'child_process';
+import pkg from 'electron-updater';
+const { autoUpdater } = pkg;
 import * as https from 'https';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import * as bot from './bot.js';
 import * as screenShare from './screenShareServer.js';
@@ -55,11 +57,13 @@ function createWindow() {
         icon: iconPath ? nativeImage.createFromPath(iconPath) : undefined,
         width: 1200,
         height: 800,
+        frame: false,
         backgroundColor: '#313338', // The gray you liked
         webPreferences: {
             preload: path.join(__dirname, '../../src/renderer/preload.cjs'),
             contextIsolation: true,
             nodeIntegration: false,
+            backgroundThrottling: false,
         },
     });
 
@@ -73,6 +77,15 @@ function createWindow() {
             mainWindow?.hide();
         }
         return false;
+    });
+
+    mainWindow.on('maximize', () => mainWindow?.webContents.send('window-state-changed', true));
+    mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window-state-changed', false));
+
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+        if (input.key === 'F12') {
+            mainWindow?.webContents.toggleDevTools();
+        }
     });
 }
 
@@ -107,24 +120,47 @@ function createTray() {
 app.whenReady().then(async () => {
     createWindow();
     createTray();
-    
+
+    autoUpdater.autoDownload = false;
+    autoUpdater.checkForUpdatesAndNotify();
+
+    autoUpdater.on('update-available', (info) => {
+        mainWindow?.webContents.send('update-available', info.version);
+    });
+    autoUpdater.on('update-not-available', () => {
+        mainWindow?.webContents.send('update-not-available');
+    });
+    autoUpdater.on('download-progress', (p) => {
+        mainWindow?.webContents.send('update-progress', p.percent);
+    });
+    autoUpdater.on('update-downloaded', () => {
+        mainWindow?.webContents.send('update-downloaded');
+    });
+
+    const showLogin = () => {
+        console.log('[Main] Sending needs-login to renderer...');
+        setTimeout(() => {
+            console.log('[Main] needs-login sent!');
+            mainWindow?.webContents.send('needs-login');
+        }, 500);
+    };
+
     try {
         const savedToken = await getSavedToken();
         if (savedToken) {
-            await bot.loginBot(savedToken);
+            const loginPromise = bot.loginBot(savedToken);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Login timeout (15s)')), 15000)
+            );
+            await Promise.race([loginPromise, timeoutPromise]);
             initBotHandlers();
         } else {
             console.log('[Main] No saved token found.');
-            setTimeout(() => {
-                mainWindow?.webContents.send('needs-login');
-            }, 2000);
+            showLogin();
         }
     } catch (e) {
         console.error('Initial login failed:', e);
-        // We let the renderer show the login screen
-        setTimeout(() => {
-            mainWindow?.webContents.send('needs-login');
-        }, 2000);
+        showLogin();
     }
 });
 
@@ -173,6 +209,7 @@ ipcMain.handle('logout', async () => {
 });
 
 ipcMain.handle('change-token', () => {
+    console.log('[Main] change-token called, sending needs-login...');
     mainWindow?.webContents.send('needs-login');
 });
 
@@ -188,6 +225,7 @@ ipcMain.handle('leave-voice', (_, guildId) => bot.leaveVoice(guildId));
 ipcMain.handle('set-mute', (_, mute) => bot.setMute(mute));
 ipcMain.handle('set-deafen', (_, deaf) => bot.setDeafen(deaf));
 ipcMain.handle('update-mic-settings', (_, volume, deviceId) => bot.updateMicSettings(volume, deviceId));
+ipcMain.handle('set-noise-suppression', (_, enabled) => bot.setNoiseSuppression(enabled));
 ipcMain.handle('set-bot-status', (_, status) => bot.setNotificationStatus(status));
 ipcMain.on('audio-to-discord', (_, buffer) => bot.injectAudioChunk(buffer));
 
@@ -226,7 +264,7 @@ ipcMain.handle('save-temp-and-send', async (_, channelId, content, arrayBuffer) 
     }
 });
 
-ipcMain.handle('get-current-user-id', () => bot.client.user?.id || null);
+ipcMain.handle('get-current-user-id', () => bot.getClient().user?.id || null);
 
 ipcMain.handle('get-bot-status', () => bot.getBotData());
 ipcMain.handle('get-env-token', () => {
@@ -234,12 +272,22 @@ ipcMain.handle('get-env-token', () => {
 });
 
 ipcMain.on('update-steam-status', (event, url) => bot.setSteamUrl(url));
+ipcMain.handle('set-launch-on-startup', (_, enabled) => {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+    return true;
+});
+ipcMain.handle('set-game-detection', (_, enabled) => {
+    if (enabled) bot.startPresenceScans();
+    else bot.stopPresenceScans();
+    return true;
+});
 ipcMain.handle('get-user-profile', (event, userId, guildId) => bot.getUserProfile(userId, guildId));
 ipcMain.handle('toggle-reaction', (e, channelId, messageId, emoji) => bot.toggleReaction(channelId, messageId, emoji));
 
 // Screen Share handlers
 let screenShareMessageId: string | null = null;
 let screenShareChannelId: string | null = null;
+let activeRoomId: string | null = null;
 
 ipcMain.handle('get-screen-sources', async () => {
     try {
@@ -259,44 +307,41 @@ ipcMain.handle('get-screen-sources', async () => {
     }
 });
 
-ipcMain.handle('start-screen-share', async (_, textChannelId) => {
+ipcMain.handle('start-screen-share', async (_, textChannelId, sourceId, sourceName) => {
     try {
-        const result = await screenShare.startScreenShareServer();
+        const result = await screenShare.startScreenShareServer(sourceId, sourceName);
         const { port, publicUrl } = result;
         
-        console.log(`[ScreenShare] Server started on port ${port}`);
-        console.log(`[ScreenShare] Public URL: ${publicUrl}`);
+        const roomId = crypto.randomUUID();
+        activeRoomId = roomId;
         
-        // Send message to Discord - use voice channel to find guild's text channel
+        const roomUrl = `${publicUrl}/room/${roomId}`;
+        
+        console.log(`[ScreenShare] Server started on port ${port}`);
+        console.log(`[ScreenShare] Room URL: ${roomUrl}`);
+        
         const voiceChannelId = bot.getCurrentVoiceChannelId();
-        console.log(`[ScreenShare] Current voice channel ID: ${voiceChannelId}`);
+        const username = bot.getClient().user?.username || 'Bootcord User';
         
         if (voiceChannelId) {
             try {
-                console.log(`[ScreenShare] Sending link based on voice channel`);
-                const message = await bot.sendScreenShareLink(voiceChannelId, publicUrl);
+                const message = await bot.sendScreenShareLink(voiceChannelId, roomUrl, roomId, username);
                 if (message) {
                     screenShareMessageId = message.id;
                     screenShareChannelId = message.channelId;
-                    console.log(`[ScreenShare] Message sent successfully: ${message.id}`);
-                } else {
-                    console.error('[ScreenShare] sendScreenShareLink returned null');
                 }
             } catch (error) {
                 console.error('[ScreenShare] Failed to send Discord message:', error);
             }
-        } else {
-            console.error('[ScreenShare] No voice channel found');
         }
-        
-        // Setup viewer change callback
-        screenShare.onViewerChange((count) => {
+
+        screenShare.onTunnelDisconnect(() => {
             if (mainWindow) {
-                mainWindow.webContents.send('screenshare-viewer-change', count);
+                mainWindow.webContents.send('screenshare-disconnect');
             }
         });
-        
-        return { success: true, url: publicUrl, port };
+
+        return { success: true, url: roomUrl, roomId, port };
     } catch (error: any) {
         console.error('[ScreenShare] Failed to start:', error);
         return { success: false, error: error.message };
@@ -305,9 +350,9 @@ ipcMain.handle('start-screen-share', async (_, textChannelId) => {
 
 ipcMain.handle('stop-screen-share', async () => {
     try {
-        screenShare.stopScreenShareServer();
+        await screenShare.stopScreenShareServer();
+        activeRoomId = null;
         
-        // Delete the Discord message
         if (screenShareMessageId && screenShareChannelId) {
             try {
                 await bot.deleteMessage(screenShareChannelId, screenShareMessageId);
@@ -325,40 +370,27 @@ ipcMain.handle('stop-screen-share', async () => {
     }
 });
 
-ipcMain.on('screenshare-frame', (_, frameData) => {
-    screenShare.broadcastFrame(Buffer.from(frameData));
+ipcMain.handle('check-for-updates', () => {
+    autoUpdater.checkForUpdates();
+    return true;
 });
 
-ipcMain.handle('check-for-updates', async () => {
-    return new Promise((resolve) => {
-        exec('git ls-remote origin main', (error, stdout, stderr) => {
-            if (error) {
-                console.error('Git check failed:', error);
-                resolve(null);
-                return;
-            }
-            // Output format: [hash] \t refs/heads/main
-            const hash = stdout.split('\t')[0];
-            resolve(hash || null);
-        });
-    });
+ipcMain.handle('download-update', () => {
+    autoUpdater.downloadUpdate();
+    return true;
 });
 
-ipcMain.handle('run-update', async () => {
-    return new Promise((resolve) => {
-        exec('git pull', (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Update error: ${error}`);
-                resolve(false);
-                return;
-            }
-            console.log(`Update output: ${stdout}`);
-            app.relaunch();
-            app.exit();
-            resolve(true);
-        });
-    });
+ipcMain.handle('install-update', () => {
+    autoUpdater.quitAndInstall();
+    return true;
 });
+
+ipcMain.on('window-minimize', () => mainWindow?.minimize());
+ipcMain.on('window-maximize-toggle', () => {
+    if (mainWindow?.isMaximized()) mainWindow?.unmaximize();
+    else mainWindow?.maximize();
+});
+ipcMain.on('window-close', () => mainWindow?.close());
 
 ipcMain.on('open-external', (_, url) => shell.openExternal(url));
 

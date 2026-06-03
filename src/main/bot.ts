@@ -44,10 +44,14 @@ let clientIntents = [
 
 let clientPartials = [Partials.Message, Partials.Channel, Partials.Reaction];
 
-export let client = new Client({
+let client = new Client({
     intents: clientIntents,
     partials: clientPartials,
 });
+
+export function getClient() {
+    return client;
+}
 
 function attachClientHandlers(c: Client) {
     c.once('ready', () => {
@@ -180,7 +184,8 @@ let gameInterval: NodeJS.Timeout | null = null;
 
 let micSettings = {
     volume: 1.0,
-    deviceId: 'default'
+    deviceId: 'default',
+    noiseSuppression: false
 };
 
 export function onMessage(handler: (msg: any) => void) {
@@ -205,13 +210,15 @@ const userStreams = new Map<string, { receiver: any, decoder: any }>();
 function formatMessage(message: Message) {
     let referencedMessage = null;
     if (message.reference && message.reference.messageId) {
-        // We try to use the cached message if available, otherwise just provide ID
-        const ref = message.mentions.repliedUser || (message as any).referencedMessage;
+        const refUser = message.mentions.repliedUser;
+        const refMsg = (message as any).referencedMessage;
         referencedMessage = {
             id: message.reference.messageId,
-            author: ref ? (ref.displayName || ref.username) : 'Unknown',
-            authorId: ref?.id,
-            content: (message as any).referencedMessage?.content || ''
+            author: refUser?.displayName || refUser?.username || refMsg?.member?.displayName || refMsg?.author?.username || 'User',
+            authorId: refUser?.id || refMsg?.author?.id,
+            avatar: refUser?.displayAvatarURL?.() || refMsg?.author?.displayAvatarURL?.() || '',
+            isMentioned: (refUser?.id || refMsg?.author?.id) === client.user?.id,
+            content: refMsg?.content || ''
         };
     }
 
@@ -260,13 +267,7 @@ function formatMessage(message: Message) {
         avatar: message.author.displayAvatarURL(),
         timestamp: message.createdAt.toLocaleTimeString(),
         rawTimestamp: message.createdAt.toISOString(),
-        referencedMessage: message.reference && message.reference.messageId ? {
-            id: message.reference.messageId,
-            author: message.mentions.repliedUser?.displayName || 'User',
-            authorId: message.mentions.repliedUser?.id,
-            isMentioned: message.mentions.repliedUser?.id === client.user?.id,
-            content: '' // Don't mistakenly show current message content as reply content
-        } : null,
+        referencedMessage,
         attachments: message.attachments.map(a => a.url),
         reactions: Array.from(message.reactions.cache.values()).map(r => ({
             emoji: r.emoji.id ? `<${r.emoji.animated ? 'a' : ''}:${r.emoji.name}:${r.emoji.id}>` : r.emoji.name,
@@ -278,10 +279,17 @@ function formatMessage(message: Message) {
         embeds: message.embeds.map(e => ({
             type: e.data.type,
             url: e.url || e.data.url,
-            provider: e.provider ? e.provider.name : null,
-            image: e.image?.url,
-            thumbnail: e.thumbnail?.url,
-            video: e.video?.url
+            provider: e.provider?.name || null,
+            title: e.title || null,
+            description: e.description || null,
+            color: e.hexColor || null,
+            author: e.author ? { name: e.author.name, url: e.author.url || null, iconURL: e.author.iconURL || null } : null,
+            footer: e.footer ? { text: e.footer.text, iconURL: e.footer.iconURL || null } : null,
+            timestamp: e.timestamp || null,
+            image: e.image?.url || null,
+            thumbnail: e.thumbnail?.url || null,
+            video: e.video?.url || null,
+            fields: e.fields?.map(f => ({ name: f.name, value: f.value, inline: f.inline || false })) || []
         })),
         systemContent,
         type: message.type,
@@ -869,8 +877,8 @@ function startPythonMic() {
         ? path.join(process.resourcesPath, 'mic.py')
         : path.join(__dirname_bot, '../../mic.py');
     
-    // Pass volume and device ID (if not default)
-    const args = [micScriptPath, '--volume', micSettings.volume.toString()];
+    // Pass volume, noise suppression flag, and device ID (if not default)
+    const args = [micScriptPath, '--volume', micSettings.volume.toString(), '--noise-suppression', micSettings.noiseSuppression ? '1' : '0'];
     if (micSettings.deviceId && micSettings.deviceId !== 'default') {
         args.push('--device', micSettings.deviceId);
     }
@@ -1146,10 +1154,21 @@ export function updateMicSettings(volume: number, deviceId: string) {
     if (micProcess) {
         if (deviceChanged) {
             stopPythonMic();
-            startPythonMic(); // Must restart to change hardware device
+            startPythonMic();
         } else if (volChanged) {
-            // Live update volume via stdin
             micProcess.stdin?.write(volume.toString() + '\n');
+        }
+    }
+}
+
+export function setNoiseSuppression(enabled: boolean) {
+    const changed = micSettings.noiseSuppression !== enabled;
+    micSettings.noiseSuppression = enabled;
+
+    if (micProcess) {
+        if (changed) {
+            // Live toggle via stdin - resets noise floor on enable
+            micProcess.stdin?.write(`noise_suppression:${enabled ? 1 : 0}\n`);
         }
     }
 }
@@ -1216,41 +1235,46 @@ export function getCurrentVoiceChannelId(): string | null {
     return currentVoiceState.channelId;
 }
 
-export async function sendScreenShareLink(channelId: string, url: string) {
+export async function sendScreenShareLink(channelId: string, url: string, roomId?: string, username?: string) {
     try {
         console.log(`[Bot] sendScreenShareLink called with voice channelId: ${channelId}`);
-        
-        // Get the voice channel
+
         const voiceChannel = await client.channels.fetch(channelId);
-        const channelName = voiceChannel && 'name' in voiceChannel ? voiceChannel.name : 'Unknown';
-        console.log(`[Bot] Fetched voice channel:`, channelName, voiceChannel?.type);
-        
+
         if (!voiceChannel || !voiceChannel.isVoiceBased()) {
             console.error('[Bot] Channel is not a voice channel');
             return null;
         }
 
-        // Find a text channel in the same guild
+        const channelName = 'name' in voiceChannel ? (voiceChannel.name ?? 'Unknown') : 'Unknown';
+
         const guild = voiceChannel.guild;
         if (!guild) {
             console.error('[Bot] No guild found');
             return null;
         }
 
-        console.log(`[Bot] Guild: ${guild.name}, searching for first available text channel...`);
-
-        // Find the first text channel where bot can send messages
         const textChannel = guild.channels.cache.find(ch => {
             if (!ch.isTextBased()) return false;
-            // Check if bot has permission to send messages
             const permissions = ch.permissionsFor(client.user!);
             return permissions && permissions.has('SendMessages');
         });
 
         if (textChannel && 'send' in textChannel && typeof textChannel.send === 'function') {
-            const sendChannelName = 'name' in textChannel ? textChannel.name : 'Unknown';
-            console.log(`[Bot] Sending message to first available text channel: ${sendChannelName}`);
-            const message = await textChannel.send(`🖥️ **Screen Share Started**\nWatch here: ${url}`);
+            const displayName = username || client.user?.username || 'Someone';
+            const embed = {
+                color: 0x5865f2,
+                title: '🖥️ Screen Share Started',
+                url: url,
+                description: `${displayName} is sharing their screen!`,
+                fields: [
+                    { name: 'Channel', value: channelName, inline: true },
+                    { name: 'Watching', value: '0 viewers', inline: true }
+                ],
+                image: roomId ? { url: `${url.replace(/\/room\//, '/api/preview/')}` } : undefined,
+                timestamp: new Date().toISOString()
+            };
+            const message = await textChannel.send({ content: url, embeds: [embed] });
             console.log('[Bot] Screen share link sent successfully');
             return message;
         }

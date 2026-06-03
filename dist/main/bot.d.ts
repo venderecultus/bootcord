@@ -1,5 +1,5 @@
 import { Client, Message, ChannelType, ActivityType, MessageType } from 'discord.js';
-export declare let client: Client<boolean>;
+export declare function getClient(): Client<boolean>;
 export declare function onMessage(handler: (msg: any) => void): void;
 export declare function onVoiceStateUpdate(handler: (data: any) => void): void;
 export declare function onAudioData(handler: (data: {
@@ -27,10 +27,11 @@ export declare function getMessageHistory(channelId: string, before?: string): P
     rawTimestamp: string;
     referencedMessage: {
         id: string;
-        author: string;
-        authorId: string | undefined;
+        author: any;
+        authorId: any;
+        avatar: any;
         isMentioned: boolean;
-        content: string;
+        content: any;
     } | null;
     attachments: string[];
     reactions: {
@@ -43,10 +44,28 @@ export declare function getMessageHistory(channelId: string, before?: string): P
     embeds: {
         type: import("discord.js").EmbedType | undefined;
         url: string | undefined;
-        provider: string | null | undefined;
-        image: string | undefined;
-        thumbnail: string | undefined;
-        video: string | undefined;
+        provider: string | null;
+        title: string | null;
+        description: string | null;
+        color: string | null;
+        author: {
+            name: string;
+            url: string | null;
+            iconURL: string | null;
+        } | null;
+        footer: {
+            text: string;
+            iconURL: string | null;
+        } | null;
+        timestamp: string | null;
+        image: string | null;
+        thumbnail: string | null;
+        video: string | null;
+        fields: {
+            name: string;
+            value: string;
+            inline: boolean;
+        }[];
     }[];
     systemContent: string | null;
     type: MessageType;
@@ -70,10 +89,11 @@ export declare function sendMessage(channelId: string, content: string, filePath
     rawTimestamp: string;
     referencedMessage: {
         id: string;
-        author: string;
-        authorId: string | undefined;
+        author: any;
+        authorId: any;
+        avatar: any;
         isMentioned: boolean;
-        content: string;
+        content: any;
     } | null;
     attachments: string[];
     reactions: {
@@ -86,10 +106,28 @@ export declare function sendMessage(channelId: string, content: string, filePath
     embeds: {
         type: import("discord.js").EmbedType | undefined;
         url: string | undefined;
-        provider: string | null | undefined;
-        image: string | undefined;
-        thumbnail: string | undefined;
-        video: string | undefined;
+        provider: string | null;
+        title: string | null;
+        description: string | null;
+        color: string | null;
+        author: {
+            name: string;
+            url: string | null;
+            iconURL: string | null;
+        } | null;
+        footer: {
+            text: string;
+            iconURL: string | null;
+        } | null;
+        timestamp: string | null;
+        image: string | null;
+        thumbnail: string | null;
+        video: string | null;
+        fields: {
+            name: string;
+            value: string;
+            inline: boolean;
+        }[];
     }[];
     systemContent: string | null;
     type: MessageType;
@@ -204,6 +242,7 @@ export declare function leaveVoice(guildId: string): {
 export declare function setMute(mute: boolean): void;
 export declare function setDeafen(deaf: boolean): void;
 export declare function updateMicSettings(volume: number, deviceId: string): void;
+export declare function setNoiseSuppression(enabled: boolean): void;
 export declare function getBotData(): {
     tag: string;
     avatar: string;
@@ -212,6 +251,6 @@ export declare function getBotData(): {
 } | null;
 export declare function loginBot(manualToken?: string): Promise<void>;
 export declare function getCurrentVoiceChannelId(): string | null;
-export declare function sendScreenShareLink(channelId: string, url: string): Promise<Message<true> | null>;
+export declare function sendScreenShareLink(channelId: string, url: string, roomId?: string, username?: string): Promise<Message<true> | null>;
 export declare function sendScreenShareLinkToChannel(textChannelId: string, url: string): Promise<Message<true> | Message<false> | null>;
 //# sourceMappingURL=bot.d.ts.map
