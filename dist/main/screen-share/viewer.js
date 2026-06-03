@@ -22,7 +22,7 @@
     var hls = new Hls({
       enableWorker: false,
       lowLatencyMode: true,
-      liveSyncDurationCount: 0.5,
+      liveSyncDurationCount: 0.3,
       liveMaxLatencyDurationCount: 2,
       maxBufferLength: 1,
       startPosition: -1,

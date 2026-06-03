@@ -57,9 +57,9 @@ export async function startScreenShareServer(sourceId, sourceName) {
         '-fflags', 'nobuffer',
         '-flags', 'low_delay',
         '-max_delay', '0',
-        '-hls_time', '1',
+        '-hls_time', '0.5',
         '-hls_list_size', '3',
-        '-hls_flags', 'delete_segments+temp_file',
+        '-hls_flags', 'delete_segments+temp_file+independent_segments',
         '-hls_segment_filename', path.join(tempDir, 'segment_%d.ts'),
         path.join(tempDir, 'stream.m3u8')
     ]);
