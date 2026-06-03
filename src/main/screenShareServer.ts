@@ -32,14 +32,12 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
     }
   }
 
-  // Create temp dir for HLS segments
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootcord-screenshare-'));
 
   if (!ffmpegPath) {
     throw new Error('ffmpeg-static binary not found');
   }
 
-  // Spawn FFmpeg with gdigrab → HLS
   const isScreen = sourceId && sourceId.startsWith('screen:');
   let inputArgs: string[];
   if (!sourceId || isScreen) {
@@ -92,7 +90,6 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
     ffmpegProcess = null;
   });
 
-  // Set up Express
   app = express();
 
   app.use('/hls', express.static(tempDir, {

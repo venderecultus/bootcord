@@ -1,5 +1,5 @@
 import express from 'express';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -20,6 +20,30 @@ let tunnelHealthInterval = null;
 let onTunnelDisconnectCallback = null;
 const SCREENSHARE_DIR = path.join(__dirname, 'screen-share');
 const viewerHtml = fs.readFileSync(path.join(SCREENSHARE_DIR, 'viewer.html'), 'utf-8');
+function detectAudioDevice() {
+    if (!ffmpegPath)
+        return null;
+    try {
+        const result = spawnSync(ffmpegPath, ['-f', 'dshow', '-list_devices', 'true', '-i', 'dummy'], {
+            encoding: 'utf-8',
+            timeout: 5000
+        });
+        const output = result.stderr || '';
+        if (output.includes('"virtual-audio-capturer"')) {
+            return 'virtual-audio-capturer';
+        }
+        const audioMatch = output.match(/"([^"]+)"\s+\(audio\s+output\)/i);
+        if (audioMatch) {
+            return audioMatch[1];
+        }
+        console.log('[ScreenShare] No audio output device found via dshow');
+        return null;
+    }
+    catch (err) {
+        console.log('[ScreenShare] Audio device probe failed:', err);
+        return null;
+    }
+}
 export async function startScreenShareServer(sourceId, sourceName) {
     if (httpServer && pinggyTunnel) {
         const urls = await pinggyTunnel.urls();
@@ -44,8 +68,16 @@ export async function startScreenShareServer(sourceId, sourceName) {
     else {
         inputArgs = ['-framerate', '30', '-f', 'gdigrab', '-i', 'desktop'];
     }
+    // Detect Windows audio loopback device for system audio capture
+    const audioDevice = detectAudioDevice();
+    const hasAudio = audioDevice !== null;
+    if (hasAudio) {
+        console.log(`[ScreenShare] Capturing audio from: ${audioDevice}`);
+    }
     const proc = spawn(ffmpegPath, [
         ...inputArgs,
+        ...(hasAudio ? ['-f', 'dshow', '-i', `audio=${audioDevice}`] : []),
+        ...(hasAudio ? ['-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100'] : ['-an']),
         '-s', '1066x600',
         '-c:v', 'libx264',
         '-preset', 'ultrafast',

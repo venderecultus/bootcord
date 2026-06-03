@@ -76,4 +76,16 @@
   } else {
     setStatus('HLS playback not supported in this browser');
   }
+
+  // Unmute button
+  var unmuteBtn = document.getElementById('unmuteBtn');
+  if (unmuteBtn) {
+    unmuteBtn.addEventListener('click', function () {
+      video.muted = !video.muted;
+      unmuteBtn.textContent = video.muted ? '🔇' : '🔊';
+    });
+    video.addEventListener('volumechange', function () {
+      unmuteBtn.textContent = video.muted ? '🔇' : '🔊';
+    });
+  }
 })();
