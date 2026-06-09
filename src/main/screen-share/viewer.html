@@ -2,10 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Bootcord Screen Share</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/viewer.css">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
 <div class="header">
@@ -13,12 +17,21 @@
 <span class="live-badge">● LIVE</span>
 <span id="streamTitle">Screen Share</span>
 </div>
+<div class="header-center">
+<div class="viewer-count" id="viewerCount">
+<i data-lucide="eye" style="width:14px;height:14px;"></i>
+<span id="viewerCountNum">0</span>
+</div>
+</div>
 <div class="header-right">
+<button class="fullscreen-btn" id="fullscreenBtn" aria-label="Toggle fullscreen" title="Fullscreen">
+<i data-lucide="maximize"></i>
+</button>
 </div>
 </div>
 
 <div class="video-container">
-<video id="video" autoplay muted playsinline></video>
+<video id="video" autoplay muted playsinline preload="auto"></video>
 <div class="status" id="status">
 <div class="spinner"></div>
 <div id="statusText">Connecting to stream...</div>

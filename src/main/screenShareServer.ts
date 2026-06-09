@@ -20,6 +20,8 @@ let tempDir: string | null = null;
 let pinggyTunnel: TunnelInstance | null = null;
 let tunnelHealthInterval: ReturnType<typeof setInterval> | null = null;
 let onTunnelDisconnectCallback: (() => void) | null = null;
+const activeViewers = new Map<string, number>();
+let viewerCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
 const SCREENSHARE_DIR = path.join(__dirname, 'screen-share');
 const viewerHtml = fs.readFileSync(path.join(SCREENSHARE_DIR, 'viewer.html'), 'utf-8');
@@ -101,6 +103,21 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
 
   app.use(express.static(SCREENSHARE_DIR));
 
+  app.get('/api/viewer-count', (req, res) => {
+    const now = Date.now();
+    let count = 0;
+    for (const ts of activeViewers.values()) {
+      if (now - ts < 15000) count++;
+    }
+    res.json({ count });
+  });
+
+  app.post('/api/viewer-ping', (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    activeViewers.set(ip, Date.now());
+    res.json({ ok: true });
+  });
+
   app.get('/room/:roomId', (req, res) => {
     const ogHtml = `
 <meta property="og:title" content="Bootcord Screen Share" />
@@ -139,6 +156,13 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
 
     console.log(`[ScreenShare] Pinggy tunnel created: ${publicUrl}`);
     pinggyTunnel = tunnel;
+
+    viewerCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [ip, ts] of activeViewers) {
+        if (now - ts > 15000) activeViewers.delete(ip);
+      }
+    }, 10000);
 
     tunnelHealthInterval = setInterval(async () => {
       if (!pinggyTunnel || !(await pinggyTunnel.isActive())) {
@@ -182,6 +206,11 @@ export async function stopScreenShareServer() {
     tempDir = null;
   }
 
+  if (viewerCleanupInterval) {
+    clearInterval(viewerCleanupInterval);
+    viewerCleanupInterval = null;
+  }
+
   if (tunnelHealthInterval) {
     clearInterval(tunnelHealthInterval);
     tunnelHealthInterval = null;
@@ -200,6 +229,8 @@ export async function stopScreenShareServer() {
     httpServer.close();
     httpServer = null;
   }
+
+  activeViewers.clear();
 
   app = null;
   serverPort = 0;

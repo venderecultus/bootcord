@@ -1,5 +1,5 @@
 import express from 'express';
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -18,32 +18,10 @@ let tempDir = null;
 let pinggyTunnel = null;
 let tunnelHealthInterval = null;
 let onTunnelDisconnectCallback = null;
+const activeViewers = new Map();
+let viewerCleanupInterval = null;
 const SCREENSHARE_DIR = path.join(__dirname, 'screen-share');
 const viewerHtml = fs.readFileSync(path.join(SCREENSHARE_DIR, 'viewer.html'), 'utf-8');
-function detectAudioDevice() {
-    if (!ffmpegPath)
-        return null;
-    try {
-        const result = spawnSync(ffmpegPath, ['-f', 'dshow', '-list_devices', 'true', '-i', 'dummy'], {
-            encoding: 'utf-8',
-            timeout: 5000
-        });
-        const output = result.stderr || '';
-        if (output.includes('"virtual-audio-capturer"')) {
-            return 'virtual-audio-capturer';
-        }
-        const audioMatch = output.match(/"([^"]+)"\s+\(audio\s+output\)/i);
-        if (audioMatch) {
-            return audioMatch[1];
-        }
-        console.log('[ScreenShare] No audio output device found via dshow');
-        return null;
-    }
-    catch (err) {
-        console.log('[ScreenShare] Audio device probe failed:', err);
-        return null;
-    }
-}
 export async function startScreenShareServer(sourceId, sourceName) {
     if (httpServer && pinggyTunnel) {
         const urls = await pinggyTunnel.urls();
@@ -51,12 +29,10 @@ export async function startScreenShareServer(sourceId, sourceName) {
             return { port: serverPort, publicUrl: urls[0] };
         }
     }
-    // Create temp dir for HLS segments
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootcord-screenshare-'));
     if (!ffmpegPath) {
         throw new Error('ffmpeg-static binary not found');
     }
-    // Spawn FFmpeg with gdigrab → HLS
     const isScreen = sourceId && sourceId.startsWith('screen:');
     let inputArgs;
     if (!sourceId || isScreen) {
@@ -68,16 +44,8 @@ export async function startScreenShareServer(sourceId, sourceName) {
     else {
         inputArgs = ['-framerate', '30', '-f', 'gdigrab', '-i', 'desktop'];
     }
-    // Detect Windows audio loopback device for system audio capture
-    const audioDevice = detectAudioDevice();
-    const hasAudio = audioDevice !== null;
-    if (hasAudio) {
-        console.log(`[ScreenShare] Capturing audio from: ${audioDevice}`);
-    }
     const proc = spawn(ffmpegPath, [
         ...inputArgs,
-        ...(hasAudio ? ['-f', 'dshow', '-i', `audio=${audioDevice}`] : []),
-        ...(hasAudio ? ['-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '44100'] : ['-an']),
         '-s', '1066x600',
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
@@ -113,7 +81,6 @@ export async function startScreenShareServer(sourceId, sourceName) {
         console.error('[FFmpeg] Failed to start:', err);
         ffmpegProcess = null;
     });
-    // Set up Express
     app = express();
     app.use('/hls', express.static(tempDir, {
         setHeaders: (res) => {
@@ -122,6 +89,20 @@ export async function startScreenShareServer(sourceId, sourceName) {
         }
     }));
     app.use(express.static(SCREENSHARE_DIR));
+    app.get('/api/viewer-count', (req, res) => {
+        const now = Date.now();
+        let count = 0;
+        for (const ts of activeViewers.values()) {
+            if (now - ts < 15000)
+                count++;
+        }
+        res.json({ count });
+    });
+    app.post('/api/viewer-ping', (req, res) => {
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
+        activeViewers.set(ip, Date.now());
+        res.json({ ok: true });
+    });
     app.get('/room/:roomId', (req, res) => {
         const ogHtml = `
 <meta property="og:title" content="Bootcord Screen Share" />
@@ -155,6 +136,13 @@ export async function startScreenShareServer(sourceId, sourceName) {
         const publicUrl = urls[0];
         console.log(`[ScreenShare] Pinggy tunnel created: ${publicUrl}`);
         pinggyTunnel = tunnel;
+        viewerCleanupInterval = setInterval(() => {
+            const now = Date.now();
+            for (const [ip, ts] of activeViewers) {
+                if (now - ts > 15000)
+                    activeViewers.delete(ip);
+            }
+        }, 10000);
         tunnelHealthInterval = setInterval(async () => {
             if (!pinggyTunnel || !(await pinggyTunnel.isActive())) {
                 if (tunnelHealthInterval) {
@@ -194,6 +182,10 @@ export async function stopScreenShareServer() {
         }
         tempDir = null;
     }
+    if (viewerCleanupInterval) {
+        clearInterval(viewerCleanupInterval);
+        viewerCleanupInterval = null;
+    }
     if (tunnelHealthInterval) {
         clearInterval(tunnelHealthInterval);
         tunnelHealthInterval = null;
@@ -211,6 +203,7 @@ export async function stopScreenShareServer() {
         httpServer.close();
         httpServer = null;
     }
+    activeViewers.clear();
     app = null;
     serverPort = 0;
     console.log('[ScreenShare] Server stopped');

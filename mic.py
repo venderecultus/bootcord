@@ -34,11 +34,11 @@ class NoiseSuppressor:
         self.hann = np.hanning(self.fft_size)
         self.noise_floor = np.zeros(self.fft_size // 2 + 1)
         self.ring_buffer = np.zeros(self.fft_size)
-        self.alpha = 0.92
-        self.over_subtraction = 1.8
-        self.spectral_floor = 0.02
+        self.alpha = 0.90
+        self.over_subtraction = 3.0
+        self.spectral_floor = 0.03
         self.frame_count = 0
-        self.noise_init_frames = 30
+        self.noise_init_frames = 40
 
     def process(self, samples):
         output = np.zeros(self.hop_size)
@@ -54,7 +54,7 @@ class NoiseSuppressor:
             return samples
         speech_energy = np.sum(mag ** 2)
         noise_energy = np.sum(self.noise_floor ** 2)
-        if speech_energy < noise_energy * 1.5:
+        if speech_energy < noise_energy * 2.0:
             self.noise_floor = self.alpha * self.noise_floor + (1 - self.alpha) * mag
         mag_sq = mag ** 2
         noise_sq = self.noise_floor ** 2

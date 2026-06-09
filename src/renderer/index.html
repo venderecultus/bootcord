@@ -18,13 +18,11 @@
 
 <body>
     <div id="toast-container"></div>
-    <div id="app-loading" class="loading-screen" style="z-index: 20000; background: #1e1f22;">
+    <div id="app-loading" class="loading-screen">
         <div class="terminal-logo">
             &gt;<div class="terminal-cursor"></div>
         </div>
-        <h1
-            style="color: white; font-family: 'Outfit', sans-serif; font-size: 28px; margin: 0; letter-spacing: -0.5px;">
-            bootcord</h1>
+        <h1 class="loading-title">bootcord</h1>
         <div id="loading-status" class="loading-status-text">initializing system...</div>
     </div>
 
@@ -46,134 +44,28 @@
         </div>
     </div>
 
-    <!-- Styles for the new loader -->
-    <style>
-        @keyframes ping {
 
-            75%,
-            100% {
-                transform: scale(2);
-                opacity: 0;
-            }
-        }
-
-        /* New Status Indicator Styles */
-        .status-dot-indicator {
-            position: absolute;
-            bottom: -2px;
-            right: -2px;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            border: 3px solid #232428;
-            z-index: 3;
-        }
-
-        .status-online {
-            background-color: #23a55a !important;
-        }
-
-        .status-idle {
-            background-color: #f0b232 !important;
-        }
-
-        .status-dnd {
-            background-color: #f23f43 !important;
-        }
-
-        .status-offline {
-            background-color: #80848e !important;
-        }
-
-        .status-picker-popover .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-
-        .status-picker-popover {
-            position: fixed;
-            bottom: 60px;
-            left: 80px;
-            background: #111214;
-            border-radius: 8px;
-            padding: 8px;
-            box-shadow: var(--shadow-el);
-            z-index: 10000;
-            width: 220px;
-        }
-
-        .status-option {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 8px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            color: #b5bac1;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-
-        .status-option:hover {
-            background: #4752c4;
-            color: white;
-        }
-
-        .status-option .status-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        .status-option span {
-            flex: 1;
-        }
-    </style>
-
-
-    <div id="login-screen" class="loading-screen"
-        style="display: none; z-index: 10001; background: radial-gradient(circle at center, #40444b 0%, #2f3136 100%);">
-        <div
-            style="width: 80px; height: 80px; background: linear-gradient(135deg, #5865f2 0%, #4752c4 100%); border-radius: 22px; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; color: white; box-shadow: 0 8px 16px rgba(0,0,0,0.3), 0 0 20px rgba(88, 101, 242, 0.4);">
+    <div id="login-screen" class="loading-screen login-container">
+        <div class="login-icon-box">
             <i data-lucide="lock" style="width: 40px; height: 40px;"></i>
         </div>
-        <h2
-            style="color: white; margin: 0 0 8px; font-family: 'Outfit', sans-serif; font-size: 28px; letter-spacing: -0.5px;">
-            Welcome to <span
-                style="background: linear-gradient(to right, #5865f2, #7d85f5); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;">bootcord</span>
+        <h2 class="login-title">
+            Welcome to <span class="accent">bootcord</span>
         </h2>
-        <p style="color: #b5bac1; font-size: 14px; margin-bottom: 32px;">Please enter your Bot Token to continue</p>
+        <p class="login-subtitle">Please enter your Bot Token to continue</p>
 
-        <div
-            style="width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 16px; background: rgba(0,0,0,0.2); padding: 32px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px);">
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <label
-                    style="color: #949ba4; text-transform: uppercase; font-size: 11px; font-weight: 800; letter-spacing: 0.5px;">Token</label>
+        <div class="login-card">
+            <div class="login-field">
+                <label class="login-label">Token</label>
                 <input type="password" id="login-token-input" placeholder="MTIzNDU2Nzg5..."
-                    style="width: 100%; background: #1e1f22; border: 1px solid rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; color: white; outline: none; font-family: monospace; transition: border 0.2s;"
-                    onfocus="this.style.border='1px solid #5865f2'"
-                    onblur="this.style.border='1px solid rgba(255,255,255,0.05)'">
+                    class="login-input">
             </div>
-            <div id="login-error"
-                style="color: #f23f42; font-size: 13px; text-align: center; display: none; font-weight: 500;">Invalid
+            <div id="login-error" class="login-error">Invalid
                 token. Please try again.</div>
-            <button id="login-submit-btn" onclick="submitLoginToken()"
-                style="width: 100%; background: linear-gradient(to right, #5865f2, #4752c4); color: white; border: none; padding: 14px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 15px; box-shadow: 0 4px 12px rgba(88, 101, 242, 0.2); transition: transform 0.1s, box-shadow 0.2s;"
-                onmouseover="this.style.boxShadow='0 6px 16px rgba(88, 101, 242, 0.4)'"
-                onmouseout="this.style.boxShadow='0 4px 12px rgba(88, 101, 242, 0.2)'"
-                onmousedown="this.style.transform='scale(0.98)'"
-                onmouseup="this.style.transform='scale(1)'">Login</button>
+            <button id="login-submit-btn" class="login-btn" onclick="submitLoginToken()">Login</button>
 
             <!-- .env button (hidden by default) -->
-            <button id="use-env-btn" onclick="useEnvToken()"
-                style="display: none; width: 100%; background: transparent; color: #949ba4; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 8px; cursor: pointer; font-size: 12px; transition: all 0.2s;"
-                onmouseover="this.style.borderColor='rgba(255,255,255,0.3)'; this.style.color='white'"
-                onmouseout="this.style.borderColor='rgba(255,255,255,0.1)'; this.style.color='#949ba4'">Use token from
+            <button id="use-env-btn" class="login-env-btn" onclick="useEnvToken()">Use token from
                 .env</button>
         </div>
 
@@ -369,8 +261,7 @@
         <div class="modal-content">
             <div class="settings-header">
                 <h2>Settings</h2>
-                <button onclick="toggleSettings()"
-                    style="background: none; border: none; color: #949ba4; cursor: pointer; display: flex; align-items: center; justify-content: center;"><i
+                <button class="settings-close-btn" onclick="toggleSettings()"><i
                         data-lucide="x" style="width: 24px; height: 24px;"></i></button>
             </div>
             <div class="settings-body">
@@ -381,15 +272,13 @@
                         <span class="settings-category-title">Voice & Audio</span>
                     </div>
                     <div class="settings-card">
-                        <div class="settings-card-row"
-                            style="margin-bottom: 12px; flex-direction: column; align-items: stretch;">
+                        <div class="settings-card-row col mb12">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Input Device</div>
                             </div>
                             <select id="mic-selector" class="settings-select" onchange="changeMic(this.value)"></select>
                         </div>
-                        <div class="settings-card-row"
-                            style="margin-bottom: 12px; flex-direction: column; align-items: stretch;">
+                        <div class="settings-card-row col mb12">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Output Device</div>
                             </div>
@@ -406,8 +295,7 @@
                                 <span class="settings-vol-label" id="mic-volume-label">100%</span>
                             </div>
                         </div>
-                        <div class="settings-card-row"
-                            style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <div class="settings-card-row sep">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Noise Suppression</div>
                             </div>
@@ -426,7 +314,7 @@
                                 <div class="settings-mic-test-bar" id="mic-test-bar"></div>
                             </div>
                         </div>
-                        <div style="font-size: 11px; color: #949ba4; margin-top: 6px;">Speak to see the level bar move.
+                        <div class="settings-hint-text">Speak to see the level bar move.
                         </div>
                     </div>
                 </div>
@@ -441,14 +329,13 @@
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Sound Volume</div>
                             </div>
-                            <div class="settings-card-vol-row" style="width: 200px;">
+                            <div class="settings-card-vol-row" style="width: 200px; flex-shrink: 0;">
                                 <input type="range" id="ui-volume-slider" min="0.1" max="1" step="0.05"
                                     oninput="updateUIVolume(this.value)">
                                 <span class="settings-vol-label" id="ui-volume-label">75%</span>
                             </div>
                         </div>
-                        <div class="settings-card-row"
-                            style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <div class="settings-card-row sep">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Voice Join/Leave Sounds</div>
                             </div>
@@ -458,9 +345,8 @@
                                 <div class="toggle-slider"></div>
                             </label>
                         </div>
-                        <div class="settings-card-row"
-                            style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);">
-                            <div style="flex: 1;">
+                        <div class="settings-card-row sep">
+                            <div class="settings-card-info">
                                 <div class="settings-card-label">Test Notification</div>
                             </div>
                             <button class="settings-btn-muted" onclick="playSound('notification')">Play</button>
@@ -474,7 +360,7 @@
                         <span class="settings-category-title">General</span>
                     </div>
                     <div class="settings-card">
-                        <div class="settings-card-row" style="margin-bottom: 12px;">
+                        <div class="settings-card-row mb12">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Auto-join Last Voice Channel</div>
                             </div>
@@ -484,8 +370,7 @@
                                 <div class="toggle-slider"></div>
                             </label>
                         </div>
-                        <div class="settings-card-row"
-                            style="margin-bottom: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <div class="settings-card-row sep mb12">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Launch at Startup</div>
                             </div>
@@ -495,8 +380,7 @@
                                 <div class="toggle-slider"></div>
                             </label>
                         </div>
-                        <div class="settings-card-row"
-                            style="padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <div class="settings-card-row sep">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Game Detection</div>
                             </div>
@@ -515,8 +399,7 @@
                         <span class="settings-category-title">Account</span>
                     </div>
                     <div class="settings-card">
-                        <div class="settings-card-row"
-                            style="margin-bottom: 12px; flex-direction: column; align-items: stretch;">
+                        <div class="settings-card-row col mb12">
                             <div class="settings-card-info">
                                 <div class="settings-card-label">Steam Profile URL</div>
                                 <div class="settings-card-hint">Used for game status display</div>

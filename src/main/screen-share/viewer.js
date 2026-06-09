@@ -2,6 +2,8 @@
   var video = document.getElementById('video');
   var status = document.getElementById('status');
   var statusText = document.getElementById('statusText');
+  var fsBtn = document.getElementById('fullscreenBtn');
+  var fsIcon = fsBtn.querySelector('[data-lucide]');
 
   function setStatus(html) {
     status.style.display = 'flex';
@@ -76,4 +78,61 @@
   } else {
     setStatus('HLS playback not supported in this browser');
   }
+
+  function updateFsIcon() {
+    var isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    fsIcon.setAttribute('data-lucide', isFs ? 'minimize' : 'maximize');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+
+  function toggleFullscreen() {
+    var el = document.documentElement;
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } else {
+      if (el.requestFullscreen) el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    }
+  }
+
+  fsBtn.addEventListener('click', toggleFullscreen);
+
+  document.addEventListener('fullscreenchange', updateFsIcon);
+  document.addEventListener('webkitfullscreenchange', updateFsIcon);
+
+  var initialTitle = document.getElementById('streamTitle');
+  var titleFromMeta = document.querySelector('meta[name="stream-title"]');
+  if (titleFromMeta) {
+    initialTitle.textContent = titleFromMeta.content;
+  }
+
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  video.addEventListener('dblclick', toggleFullscreen);
+
+  var viewerCountEl = document.getElementById('viewerCountNum');
+
+  function pollViewerCount() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/viewer-count', true);
+    xhr.onload = function () {
+      if (xhr.status === 200) {
+        var data = JSON.parse(xhr.responseText);
+        viewerCountEl.textContent = data.count;
+      }
+    };
+    xhr.send();
+  }
+
+  function sendHeartbeat() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/viewer-ping', true);
+    xhr.send();
+  }
+
+  pollViewerCount();
+  setInterval(pollViewerCount, 5000);
+  setInterval(sendHeartbeat, 10000);
+  sendHeartbeat();
 })();
