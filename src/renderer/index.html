@@ -731,23 +731,29 @@
         window.electronAPI.getCurrentUserId().then(id => { currentUserId = id; });
 
         // UI Sounds
-        const sounds = {
-            join: new Audio('../sounds/voice_self_enter.mp3'),
-            leave: new Audio('../sounds/voice_self_leave.mp3'),
-            altJoin: new Audio('../sounds/voice_enter.mp3'),
-            altLeave: new Audio('../sounds/voice_leave.mp3'),
-            mute: new Audio('../sounds/microphone_mute.mp3'),
-            unmute: new Audio('../sounds/microphone_unmute.mp3'),
-            deafen: new Audio('../sounds/headphone_mute.mp3'),
-            undeafen: new Audio('../sounds/headphone_unmute.mp3'),
-            notification: new Audio('../sounds/notification.mp3'),
-            screenshare_on: new Audio('../sounds/screenshare_on.mp3'),
-            screenshare_off: new Audio('../sounds/screenshare_off.mp3'),
-            screenshare_enter: new Audio('../sounds/screenshare_enter.mp3'),
-            screenshare_leave: new Audio('../sounds/screenshare_leave.mp3')
+        const soundFiles = {
+            join: '../sounds/voice_self_enter.mp3',
+            leave: '../sounds/voice_self_leave.mp3',
+            altJoin: '../sounds/voice_enter.mp3',
+            altLeave: '../sounds/voice_leave.mp3',
+            mute: '../sounds/microphone_mute.mp3',
+            unmute: '../sounds/microphone_unmute.mp3',
+            deafen: '../sounds/headphone_mute.mp3',
+            undeafen: '../sounds/headphone_unmute.mp3',
+            notification: '../sounds/notification.mp3',
+            screenshare_on: '../sounds/screenshare_on.mp3',
+            screenshare_off: '../sounds/screenshare_off.mp3',
+            screenshare_enter: '../sounds/screenshare_enter.mp3',
+            screenshare_leave: '../sounds/screenshare_leave.mp3',
+            dm_ringtone: '../sounds/dm_ringtone.mp3',
+            dm_outgoing: '../sounds/dm_outgoing.mp3'
         };
-
-        sounds.notification.addEventListener('error', (e) => console.error('[Audio] Notification load error', e));
+        const sounds = {};
+        for (const [name, src] of Object.entries(soundFiles)) {
+            const a = new Audio(src);
+            a.addEventListener('error', (e) => console.error(`[Audio] Load error: ${name} (${src})`, e.error || e));
+            sounds[name] = a;
+        }
 
         function playProgrammaticBeep() {
             try {
@@ -1491,7 +1497,7 @@
 
             if (isNew && !msg.isSelf && (isPing || isReplyToMe)) {
                 console.log(`[Global notification] Triggered. Ping: ${isPing}, Reply: ${isReplyToMe}, Guild: ${msg.guildId}`);
-                playSound('notification');
+                playSound(msg.guildId ? 'notification' : 'dm_ringtone');
 
                 // Track guild-level badges
                 if (String(msg.channelId) !== String(selectedChannelId)) {

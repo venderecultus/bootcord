@@ -33,6 +33,7 @@
     "files": [
       "dist/**/*",
       "src/renderer/**/*",
+      "src/sounds/**/*",
       "src/icon.png",
       "package.json"
     ],
