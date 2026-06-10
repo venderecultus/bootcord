@@ -7,34 +7,10 @@
     "build": "tsc && xcopy /E /I /Y src\\main\\screen-share dist\\main\\screen-share",
     "start": "npm run build && electron .",
     "watch": "tsc -w",
-    "dist": "npm run build && npx electron-builder --publish=never"
-  },
-  "build": {
-    "appId": "com.nutbrothers.bootcord",
-    "productName": "bootcord",
-    "compression": "maximum",
-    "removePackageScripts": true,
-    "asar": true,
-    "asarUnpack": [
-      "**/node_modules/ffmpeg-static/**/*"
-    ],
-    "win": {
-      "target": "portable",
-      "icon": "src/icon.png"
-    },
-    "extraResources": [
-      "mic.py"
-    ],
-    "files": [
-      "dist/**/*",
-      "src/renderer/**/*",
-      "src/sounds/**/*",
-      "src/icon.png",
-      "package.json"
-    ],
-    "directories": {
-      "output": "release"
-    }
+    "pack-unpacked": "npx electron-builder --win dir --config.win.target=dir --config.directories.output=release --config.extraResources=mic.py --config.asar=true --config.asarUnpack=\"**/node_modules/ffmpeg-static/**/*\" --config.files=dist/**/* --config.files=src/renderer/**/* --config.files=src/sounds/**/* --config.files=src/icon.png --config.files=package.json --config.appId=com.nutbrothers.bootcord --config.productName=bootcord --config.win.icon=src/icon.png",
+    "release": "npm run build && npm run pack-unpacked && npm run vpk-pack",
+    "vpk-pack": "node scripts/vpk-pack.mjs",
+    "dist": "npm run release"
   },
   "keywords": [],
   "author": "",
@@ -50,6 +26,7 @@
     "opusscript": "^0.0.8",
     "prism-media": "^1.3.5",
     "sodium-native": "^5.1.0",
+    "velopack": "^1.2.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {
@@ -58,6 +35,7 @@
     "@types/node": "^25.5.0",
     "@types/ws": "^8.18.1",
     "electron": "^41.0.2",
+    "electron-builder": "^26.15.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

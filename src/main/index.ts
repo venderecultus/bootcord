@@ -4,10 +4,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import * as bot from './bot.js';
 import * as screenShare from './screenShareServer.js';
+import { VelopackApp, UpdateManager } from 'velopack';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -116,52 +116,25 @@ function createTray() {
     tray.on('double-click', () => mainWindow?.show());
 }
 
-const GITHUB_OWNER = 'venderecultus';
-const GITHUB_REPO = 'bootcord';
+// Velopack — must run before any other app code
+VelopackApp.build().run();
 
-function versionGreater(a: string, b: string): boolean {
-    const pa = a.replace('v', '').split('.').map(Number);
-    const pb = b.replace('v', '').split('.').map(Number);
-    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-        const na = pa[i] || 0;
-        const nb = pb[i] || 0;
-        if (na !== nb) return na > nb;
-    }
-    return false;
-}
-
-async function checkLatestRelease(): Promise<{ version: string; downloadUrl: string } | null> {
-    return new Promise((resolve) => {
-        https.get(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
-            headers: { 'User-Agent': 'bootcord' }
-        }, (res) => {
-            let data = '';
-            res.on('data', (c) => data += c);
-            res.on('end', () => {
-                try {
-                    const rel = JSON.parse(data);
-                    const tag = (rel.tag_name || '').replace('v', '');
-                    const asset = rel.assets?.find((a: any) => a.name.endsWith('.exe') && a.name.includes(tag));
-                    if (asset?.browser_download_url) {
-                        resolve({ version: tag, downloadUrl: asset.browser_download_url });
-                    } else {
-                        resolve(null);
-                    }
-                } catch { resolve(null); }
-            });
-        }).on('error', () => resolve(null));
-    });
-}
+const UPDATE_URL = 'https://github.com/venderecultus/bootcord';
 
 app.whenReady().then(async () => {
     createWindow();
     createTray();
 
-    const currentVer = app.getVersion();
-    const latest = await checkLatestRelease();
-    if (latest && versionGreater(latest.version, currentVer)) {
-        mainWindow?.webContents.send('update-available', latest.version);
-    } else {
+    // Silent check at startup
+    try {
+        const um = new UpdateManager(UPDATE_URL);
+        const info = await um.checkForUpdatesAsync();
+        if (info) {
+            mainWindow?.webContents.send('update-available', String(info.TargetFullRelease?.Version || ''));
+        } else {
+            mainWindow?.webContents.send('update-not-available');
+        }
+    } catch {
         mainWindow?.webContents.send('update-not-available');
     }
 
@@ -402,43 +375,32 @@ ipcMain.handle('stop-screen-share', async () => {
     }
 });
 
-let updateDownloadUrl: string | null = null;
-let updateExePath: string | null = null;
+let velopackUpdateInfo: any = null;
 
 ipcMain.handle('check-for-updates', async () => {
-    const currentVer = app.getVersion();
-    const latest = await checkLatestRelease();
-    if (latest && versionGreater(latest.version, currentVer)) {
-        updateDownloadUrl = latest.downloadUrl;
-        mainWindow?.webContents.send('update-available', latest.version);
-    } else {
+    try {
+        const um = new UpdateManager(UPDATE_URL);
+        const info = await um.checkForUpdatesAsync();
+        if (info) {
+            velopackUpdateInfo = info;
+            const ver = String(info.TargetFullRelease?.Version || '');
+            mainWindow?.webContents.send('update-available', ver);
+        } else {
+            mainWindow?.webContents.send('update-not-available');
+        }
+    } catch {
         mainWindow?.webContents.send('update-not-available');
     }
     return true;
 });
 
 ipcMain.handle('download-update', async () => {
-    if (!updateDownloadUrl) return false;
-    const dest = path.join(app.getPath('temp'), `bootcord-update-${Date.now()}.exe`);
+    if (!velopackUpdateInfo) return false;
     try {
-        await new Promise<void>((resolve, reject) => {
-            const file = fs.createWriteStream(dest);
-            https.get(updateDownloadUrl!, {
-                headers: { 'User-Agent': 'bootcord' }
-            }, (res) => {
-                const total = parseInt(res.headers['content-length'] || '0', 10);
-                let downloaded = 0;
-                res.on('data', (chunk: Buffer) => {
-                    downloaded += chunk.length;
-                    if (total) {
-                        mainWindow?.webContents.send('update-progress', (downloaded / total) * 100);
-                    }
-                });
-                res.pipe(file);
-                file.on('finish', () => { file.close(); resolve(); });
-            }).on('error', reject);
+        const um = new UpdateManager(UPDATE_URL);
+        await um.downloadUpdateAsync(velopackUpdateInfo, (pct: number) => {
+            mainWindow?.webContents.send('update-progress', pct);
         });
-        updateExePath = dest;
         mainWindow?.webContents.send('update-downloaded');
         return true;
     } catch (e) {
@@ -447,10 +409,11 @@ ipcMain.handle('download-update', async () => {
     }
 });
 
-ipcMain.handle('install-update', () => {
-    if (!updateExePath) return;
+ipcMain.handle('install-update', async () => {
+    if (!velopackUpdateInfo) return;
     try {
-        execFile(updateExePath, { detached: true, stdio: 'ignore' } as any);
+        const um = new UpdateManager(UPDATE_URL);
+        await um.waitExitThenApplyUpdate(velopackUpdateInfo);
         app.quit();
     } catch (e) {
         console.error('[Update] Install failed:', e);

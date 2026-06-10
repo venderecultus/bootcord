@@ -13,9 +13,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.x
+      - run: dotnet tool install -g vpk
       - run: npm ci
-      - run: npm run dist
+      - run: npm run release
       - uses: actions/upload-artifact@v4
         with:
           name: bootcord
-          path: release/*.exe
+          path: Releases/
