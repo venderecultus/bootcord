@@ -1117,10 +1117,12 @@ export async function loginBot(manualToken) {
     if (!token)
         throw new Error('No token provided and DISCORD_TOKEN not found in .env');
     console.log(`[Bot] Attempting login with token: ${token.substring(0, 10)}...`);
-    // If client is already initialized and logged in, we destroy it to start fresh
-    if (client.isReady()) {
-        console.log('[Bot] Destroying existing client for fresh login...');
-        client.destroy();
+    // Always destroy stale client before re-login (covers timeout + fresh login cases)
+    if (client) {
+        try {
+            client.destroy();
+        }
+        catch (_) { /* already destroyed */ }
         client = new Client({
             intents: clientIntents,
             partials: clientPartials,

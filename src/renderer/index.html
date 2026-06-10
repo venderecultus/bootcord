@@ -3671,7 +3671,17 @@
             btn.textContent = 'Verifying...';
             error.style.display = 'none';
 
-            const result = await window.electronAPI.submitToken(token);
+            let result;
+            try {
+                result = await window.electronAPI.submitToken(token);
+            } catch (e) {
+                console.error('[Login] submitToken invoke failed:', e);
+                btn.disabled = false;
+                btn.textContent = 'Login';
+                error.textContent = 'Connection error. Try again.';
+                error.style.display = 'block';
+                return;
+            }
             if (result.success) {
                 // Snappy UI update
                 document.getElementById('login-screen').style.display = 'none';

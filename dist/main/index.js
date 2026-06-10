@@ -1,11 +1,10 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, desktopCapturer } from 'electron';
-import pkg from 'electron-updater';
-const { autoUpdater } = pkg;
 import * as https from 'https';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import * as bot from './bot.js';
 import * as screenShare from './screenShareServer.js';
@@ -105,23 +104,56 @@ function createTray() {
     tray.setContextMenu(contextMenu);
     tray.on('double-click', () => mainWindow?.show());
 }
+const GITHUB_OWNER = 'venderecultus';
+const GITHUB_REPO = 'bootcord';
+function versionGreater(a, b) {
+    const pa = a.replace('v', '').split('.').map(Number);
+    const pb = b.replace('v', '').split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const na = pa[i] || 0;
+        const nb = pb[i] || 0;
+        if (na !== nb)
+            return na > nb;
+    }
+    return false;
+}
+async function checkLatestRelease() {
+    return new Promise((resolve) => {
+        https.get(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
+            headers: { 'User-Agent': 'bootcord' }
+        }, (res) => {
+            let data = '';
+            res.on('data', (c) => data += c);
+            res.on('end', () => {
+                try {
+                    const rel = JSON.parse(data);
+                    const tag = (rel.tag_name || '').replace('v', '');
+                    const asset = rel.assets?.find((a) => a.name.endsWith('.exe') && a.name.includes(tag));
+                    if (asset?.browser_download_url) {
+                        resolve({ version: tag, downloadUrl: asset.browser_download_url });
+                    }
+                    else {
+                        resolve(null);
+                    }
+                }
+                catch {
+                    resolve(null);
+                }
+            });
+        }).on('error', () => resolve(null));
+    });
+}
 app.whenReady().then(async () => {
     createWindow();
     createTray();
-    autoUpdater.autoDownload = false;
-    autoUpdater.checkForUpdatesAndNotify();
-    autoUpdater.on('update-available', (info) => {
-        mainWindow?.webContents.send('update-available', info.version);
-    });
-    autoUpdater.on('update-not-available', () => {
+    const currentVer = app.getVersion();
+    const latest = await checkLatestRelease();
+    if (latest && versionGreater(latest.version, currentVer)) {
+        mainWindow?.webContents.send('update-available', latest.version);
+    }
+    else {
         mainWindow?.webContents.send('update-not-available');
-    });
-    autoUpdater.on('download-progress', (p) => {
-        mainWindow?.webContents.send('update-progress', p.percent);
-    });
-    autoUpdater.on('update-downloaded', () => {
-        mainWindow?.webContents.send('update-downloaded');
-    });
+    }
     const showLogin = () => {
         console.log('[Main] Sending needs-login to renderer...');
         setTimeout(() => {
@@ -167,14 +199,16 @@ ipcMain.handle('create-invite', (_, channelId) => bot.createInvite(channelId));
 ipcMain.handle('get-pins', (_, channelId) => bot.getPins(channelId));
 ipcMain.handle('submit-token', async (_, token) => {
     try {
-        await bot.loginBot(token);
+        const loginPromise = bot.loginBot(token);
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Login timeout (20s)')), 20000));
+        await Promise.race([loginPromise, timeout]);
         await saveToken(token);
         initBotHandlers();
         return { success: true };
     }
     catch (error) {
-        console.error('[Main] Token submission failed:', error);
-        return { success: false, error: error.message };
+        console.error('[Main] Token submission failed:', error?.message || error);
+        return { success: false, error: error?.message || 'Unknown error' };
     }
 });
 ipcMain.handle('logout', async () => {
@@ -336,17 +370,61 @@ ipcMain.handle('stop-screen-share', async () => {
         return { success: false, error: error.message };
     }
 });
-ipcMain.handle('check-for-updates', () => {
-    autoUpdater.checkForUpdates();
+let updateDownloadUrl = null;
+let updateExePath = null;
+ipcMain.handle('check-for-updates', async () => {
+    const currentVer = app.getVersion();
+    const latest = await checkLatestRelease();
+    if (latest && versionGreater(latest.version, currentVer)) {
+        updateDownloadUrl = latest.downloadUrl;
+        mainWindow?.webContents.send('update-available', latest.version);
+    }
+    else {
+        mainWindow?.webContents.send('update-not-available');
+    }
     return true;
 });
-ipcMain.handle('download-update', () => {
-    autoUpdater.downloadUpdate();
-    return true;
+ipcMain.handle('download-update', async () => {
+    if (!updateDownloadUrl)
+        return false;
+    const dest = path.join(app.getPath('temp'), `bootcord-update-${Date.now()}.exe`);
+    try {
+        await new Promise((resolve, reject) => {
+            const file = fs.createWriteStream(dest);
+            https.get(updateDownloadUrl, {
+                headers: { 'User-Agent': 'bootcord' }
+            }, (res) => {
+                const total = parseInt(res.headers['content-length'] || '0', 10);
+                let downloaded = 0;
+                res.on('data', (chunk) => {
+                    downloaded += chunk.length;
+                    if (total) {
+                        mainWindow?.webContents.send('update-progress', (downloaded / total) * 100);
+                    }
+                });
+                res.pipe(file);
+                file.on('finish', () => { file.close(); resolve(); });
+            }).on('error', reject);
+        });
+        updateExePath = dest;
+        mainWindow?.webContents.send('update-downloaded');
+        return true;
+    }
+    catch (e) {
+        console.error('[Update] Download failed:', e);
+        return false;
+    }
 });
 ipcMain.handle('install-update', () => {
-    autoUpdater.quitAndInstall();
-    return true;
+    if (!updateExePath)
+        return;
+    try {
+        execFile(updateExePath, { detached: true, stdio: 'ignore' });
+        app.quit();
+    }
+    catch (e) {
+        console.error('[Update] Install failed:', e);
+    }
 });
 ipcMain.on('window-minimize', () => mainWindow?.minimize());
 ipcMain.on('window-maximize-toggle', () => {

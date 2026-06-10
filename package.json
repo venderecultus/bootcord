@@ -7,18 +7,13 @@
     "build": "tsc && xcopy /E /I /Y src\\main\\screen-share dist\\main\\screen-share",
     "start": "npm run build && electron .",
     "watch": "tsc -w",
-    "dist": "npm run build && npx electron-builder"
+    "dist": "npm run build && npx electron-builder --publish=never"
   },
   "build": {
     "appId": "com.nutbrothers.bootcord",
     "productName": "bootcord",
     "compression": "maximum",
     "removePackageScripts": true,
-    "publish": {
-      "provider": "github",
-      "owner": "venderecultus",
-      "repo": "bootcord"
-    },
     "asar": true,
     "asarUnpack": [
       "**/node_modules/ffmpeg-static/**/*"
@@ -50,7 +45,6 @@
     "@pinggy/pinggy": "^0.4.9",
     "discord.js": "^14.25.1",
     "dotenv": "^17.3.1",
-    "electron-updater": "^6.8.3",
     "express": "^5.2.1",
     "ffmpeg-static": "^5.3.0",
     "opusscript": "^0.0.8",
