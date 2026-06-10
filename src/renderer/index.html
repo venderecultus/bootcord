@@ -72,6 +72,11 @@
     </div>
 
     <div class="server-list">
+        <div id="friends-icon" class="server-icon" onclick="toggleFriendsView()" title="Friends"
+            style="margin-bottom: 4px;">
+            <i data-lucide="users" style="width: 28px; height: 28px; color: var(--text-muted);"></i>
+            <div class="active-indicator" id="friends-indicator" style="height: 0; opacity: 0;"></div>
+        </div>
         <div id="server-list"></div>
         <div
             style="margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 20px;">
@@ -235,6 +240,65 @@
 
     <div class="member-sidebar">
         <div id="member-list" style="padding: 0 8px;"></div>
+    </div>
+
+    <!-- Friends View -->
+    <div id="friends-view" class="main-content" style="display: none;">
+        <div class="chat-header">
+            <div style="font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 12px;">
+                <i data-lucide="users" style="width: 22px; height: 22px; color: var(--accent);"></i>
+                Friends
+            </div>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; gap: 12px;">
+            <div style="display: flex; gap: 12px; align-items: center; position: relative;">
+                <div style="flex: 1; position: relative;">
+                    <input type="text" id="friend-add-input" placeholder="Search by name..."
+                        oninput="onFriendSearchInput(this.value)"
+                        style="width: 100%; background: #1e1f22; border: none; border-radius: 8px; padding: 10px 14px; color: #dbdee1; outline: none; font-size: 14px;">
+                    <div id="friend-search-results" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #2b2d31; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; margin-top: 4px; max-height: 300px; overflow-y: auto; z-index: 100;"></div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <div id="friends-tab-all" class="settings-btn-muted" style="background: var(--accent); color: #fff;" onclick="switchFriendsTab('all')">All Friends</div>
+                <div id="friends-tab-pending" class="settings-btn-muted" onclick="switchFriendsTab('pending')">Pending</div>
+            </div>
+            <div id="friends-list-container" style="flex: 1; display: flex; flex-direction: column; gap: 4px;"></div>
+        </div>
+    </div>
+
+    <!-- Incoming Call Overlay -->
+    <div id="incoming-call-overlay" class="modal-container" style="display: none; z-index: 30000; align-items: flex-start; padding-top: 80px;">
+        <div style="background: var(--glass-bg); backdrop-filter: var(--glass-blur); border: var(--glass-border); border-radius: var(--radius-lg); padding: 32px; width: 360px; text-align: center; display: flex; flex-direction: column; gap: 16px;">
+            <div style="font-size: 40px; color: var(--accent);"><i data-lucide="phone-call" style="width: 48px; height: 48px;"></i></div>
+            <div id="incoming-caller-name" style="font-size: 20px; font-weight: 700; color: var(--text-header);">Incoming Call</div>
+            <div style="color: var(--text-muted); font-size: 14px;">from bootcord</div>
+            <div style="display: flex; gap: 16px; justify-content: center;">
+                <button onclick="rejectIncomingCall()" style="width: 64px; height: 64px; border-radius: 50%; border: none; background: #f23f43; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                    <i data-lucide="phone-off" style="width: 28px; height: 28px;"></i>
+                </button>
+                <button onclick="answerIncomingCall()" style="width: 64px; height: 64px; border-radius: 50%; border: none; background: #23a55a; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                    <i data-lucide="phone" style="width: 28px; height: 28px;"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Friend Request Notification Modal -->
+    <div id="friend-request-notification" class="modal-container" style="display: none; z-index: 30001; align-items: flex-start; padding-top: 80px;">
+        <div style="background: var(--glass-bg); backdrop-filter: var(--glass-blur); border: var(--glass-border); border-radius: var(--radius-lg); padding: 32px; width: 360px; text-align: center; display: flex; flex-direction: column; gap: 16px;">
+            <div style="font-size: 40px; color: var(--accent);"><i data-lucide="user-plus" style="width: 48px; height: 48px;"></i></div>
+            <div id="friend-request-user" style="font-size: 18px; font-weight: 700; color: var(--text-header);">Friend Request</div>
+            <div style="color: var(--text-muted); font-size: 14px;">wants to be your friend</div>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button onclick="rejectPendingFriend()" style="padding: 10px 24px; border-radius: 8px; border: none; background: #f23f43; color: white; cursor: pointer; font-weight: 600;">
+                    <i data-lucide="x" style="width: 16px; height: 16px;"></i> Decline
+                </button>
+                <button onclick="acceptPendingFriend()" style="padding: 10px 24px; border-radius: 8px; border: none; background: var(--accent); color: white; cursor: pointer; font-weight: 600;">
+                    <i data-lucide="check" style="width: 16px; height: 16px;"></i> Accept
+                </button>
+            </div>
+        </div>
     </div>
 
     <div id="context-menu" class="context-menu">
@@ -666,6 +730,7 @@
         const pickerPopover = document.getElementById('picker-popover');
         const mentionPicker = document.getElementById('mention-picker');
 
+        const FRIENDS_GUILD_ID = '1513156160352419920';
         let currentGuildId = null;
         let selectedChannelId = null;
         let mentionCounts = {}; // { guildId: count }
@@ -674,6 +739,10 @@
         let voiceGuildId = null;
         let isMuted = false;
         let isDeafened = false;
+        let friendsViewActive = false;
+        let friendsTab = 'all';
+        let pendingRequestUserId = null;
+        let incomingCallChannelId = null;
         let rightClickedMediaUrl = null;
         let rightClickedGifElement = null;
         let pickedFiles = [];
@@ -826,6 +895,17 @@
                 toast.classList.add('closing');
                 setTimeout(() => toast.remove(), 200);
             }, 3000);
+        }
+
+        function showSystemNotification(msg) {
+            const isDM = !msg.guildId;
+            const rawPreview = (msg.content || '').substring(0, 150);
+            const preview = rawPreview.replace(/\[\[(@|#)([^\]]+)\]\]/g, '$1$2');
+            const title = isDM
+                ? `${msg.author || 'Unknown'} — bootcord`
+                : `${msg.author || 'Unknown'} — ${msg.guildName || 'Server'} / #${msg.channelName || 'channel'} — bootcord`;
+            const body = preview || (msg.attachments?.length ? '[Attachment]' : '[Embed]');
+            window.electronAPI.showSystemNotification(title, body);
         }
 
         function updateNewMessagesBar() {
@@ -1498,6 +1578,9 @@
             if (isNew && !msg.isSelf && (isPing || isReplyToMe)) {
                 console.log(`[Global notification] Triggered. Ping: ${isPing}, Reply: ${isReplyToMe}, Guild: ${msg.guildId}`);
                 playSound(msg.guildId ? 'notification' : 'dm_ringtone');
+
+                // Show system notification
+                showSystemNotification(msg);
 
                 // Track guild-level badges
                 if (String(msg.channelId) !== String(selectedChannelId)) {
@@ -2773,6 +2856,7 @@
         };
 
         async function selectServer(id, name, auto = true) {
+            exitFriendsView();
             currentGuildId = id;
             selectedChannelId = null;
             shouldAutoSelectFirstChannel = auto;
@@ -2831,7 +2915,8 @@
         }
 
         async function loadServers() {
-            const servers = await window.electronAPI.getServers();
+            const allServers = await window.electronAPI.getServers();
+            const servers = allServers.filter(s => s.id !== FRIENDS_GUILD_ID);
             // Don't clear innerHTML immediately to avoid flicker
             const tempContainer = document.createElement('div');
             servers.forEach(server => {
@@ -2860,6 +2945,251 @@
             while (tempContainer.firstChild) {
                 serverList.appendChild(tempContainer.firstChild);
             }
+        }
+
+        // ============ FRIENDS VIEW ============
+
+        function exitFriendsView() {
+            if (!friendsViewActive) return;
+            friendsViewActive = false;
+            const friendsView = document.getElementById('friends-view');
+            const channelSidebar = document.querySelector('.channel-sidebar');
+            const mainContent = document.querySelector('.main-content');
+            const memberSidebar = document.querySelector('.member-sidebar');
+            const friendsIcon = document.getElementById('friends-icon');
+            const friendsIndicator = document.getElementById('friends-indicator');
+            friendsView.style.display = 'none';
+            channelSidebar.style.display = '';
+            mainContent.style.display = '';
+            memberSidebar.style.display = '';
+            friendsIcon.classList.remove('active');
+            friendsIndicator.style.height = '0px';
+            friendsIndicator.style.opacity = '0';
+            updateIcons();
+        }
+
+        function toggleFriendsView() {
+            if (friendsViewActive) {
+                exitFriendsView();
+                return;
+            }
+            friendsViewActive = true;
+            const friendsView = document.getElementById('friends-view');
+            const channelSidebar = document.querySelector('.channel-sidebar');
+            const mainContent = document.querySelector('.main-content');
+            const memberSidebar = document.querySelector('.member-sidebar');
+            const friendsIcon = document.getElementById('friends-icon');
+            const friendsIndicator = document.getElementById('friends-indicator');
+            friendsView.style.display = 'flex';
+            channelSidebar.style.display = 'none';
+            mainContent.style.display = 'none';
+            memberSidebar.style.display = 'none';
+            friendsIcon.classList.add('active');
+            friendsIndicator.style.height = '40px';
+            friendsIndicator.style.opacity = '1';
+            renderFriendsList();
+            updateIcons();
+        }
+
+        let friendSearchTimer = null;
+
+        function onFriendSearchInput(query) {
+            clearTimeout(friendSearchTimer);
+            const resultsDiv = document.getElementById('friend-search-results');
+            if (query.trim().length < 2) {
+                resultsDiv.style.display = 'none';
+                return;
+            }
+            friendSearchTimer = setTimeout(async () => {
+                const users = await window.electronAPI.searchUsersByName(query.trim());
+                if (users.length === 0) {
+                    resultsDiv.innerHTML = '<div style="padding: 12px; color: var(--text-muted); text-align: center;">No users found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                resultsDiv.innerHTML = '';
+                const friends = await window.electronAPI.getFriendList();
+                const friendIds = new Set(friends.map(f => f.id));
+                users.forEach(u => {
+                    const el = document.createElement('div');
+                    el.dataset.userid = u.id;
+                    el.dataset.tag = u.tag;
+                    el.style.cssText = 'display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; border-radius: 6px; transition: background 0.15s;';
+                    el.onmouseenter = () => el.style.background = 'rgba(255,255,255,0.05)';
+                    el.onmouseleave = () => el.style.background = 'transparent';
+                    const alreadyFriend = friendIds.has(u.id);
+                    el.innerHTML = `
+                        <img src="${u.avatar}" style="width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;">
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: 600; color: var(--text-header); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${u.globalName}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">${u.tag}</div>
+                        </div>
+                        ${alreadyFriend
+                            ? '<span style="font-size: 12px; color: #23a55a;">✓ Friend</span>'
+                            : `<button onclick="event.stopPropagation(); doAddFriend('${u.id}')" style="padding: 6px 14px; border-radius: 6px; border: none; background: var(--accent); color: white; cursor: pointer; font-size: 12px; font-weight: 600;"><i data-lucide="user-plus" style="width: 14px; height: 14px;"></i> Add</button>`
+                        }
+                    `;
+                    resultsDiv.appendChild(el);
+                });
+                resultsDiv.style.display = 'block';
+                lucide.createIcons(resultsDiv);
+            }, 300);
+        }
+
+        async function doAddFriend(userId) {
+            const resultsDiv = document.getElementById('friend-search-results');
+            const userEl = resultsDiv?.querySelector(`[data-userid="${userId}"]`);
+            const tag = userEl?.dataset?.tag || userId;
+            await window.electronAPI.addFriendByTag(tag);
+            if (userEl) {
+                userEl.innerHTML = '<span style="font-size: 12px; color: #f0b232;">✉ Invite sent</span>';
+            }
+            showToast('Friend request sent to @' + tag, 'success');
+            document.getElementById('friend-add-input').value = '';
+            setTimeout(() => { if (resultsDiv) resultsDiv.style.display = 'none'; }, 1500);
+        }
+
+        // Close search results on click outside
+        document.addEventListener('click', (e) => {
+            const results = document.getElementById('friend-search-results');
+            const input = document.getElementById('friend-add-input');
+            if (results && input && !results.contains(e.target) && e.target !== input) {
+                results.style.display = 'none';
+            }
+        });
+
+        function switchFriendsTab(tab) {
+            friendsTab = tab;
+            document.querySelectorAll('[id^="friends-tab-"]').forEach(el => {
+                el.style.background = '';
+                el.style.color = '';
+            });
+            const activeTab = document.getElementById('friends-tab-' + tab);
+            if (activeTab) {
+                activeTab.style.background = 'var(--accent)';
+                activeTab.style.color = '#fff';
+            }
+            if (tab === 'all') renderFriendsList();
+            else renderPendingFriends();
+        }
+
+        async function renderFriendsList() {
+            const container = document.getElementById('friends-list-container');
+            container.innerHTML = '<div style="color: var(--text-muted); padding: 12px;">Loading...</div>';
+            const friends = await window.electronAPI.getFriendList();
+            container.innerHTML = '';
+            if (friends.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); padding: 24px; text-align: center;">No friends yet. Search for someone by name above!</div>';
+                return;
+            }
+            friends.forEach(f => {
+                const el = document.createElement('div');
+                el.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; transition: background 0.2s; cursor: pointer;';
+                el.onmouseover = () => el.style.background = 'rgba(255,255,255,0.04)';
+                el.onmouseout = () => el.style.background = 'transparent';
+                el.onclick = () => window.electronAPI.getUserProfile(f.id).then(p => { if (p) showProfile(p); });
+                const statusColor = f.status === 'online' ? '#23a55a' : f.status === 'idle' ? '#f0b232' : f.status === 'dnd' ? '#f23f43' : '#80848e';
+                el.innerHTML = `
+                    <div style="position: relative; width: 40px; height: 40px; flex-shrink: 0;">
+                        <img src="${f.avatar}" style="width: 40px; height: 40px; border-radius: 50%;">
+                        <div style="position: absolute; bottom: 0; right: 0; width: 14px; height: 14px; border-radius: 50%; background: ${statusColor}; border: 3px solid #313338;"></div>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 600; color: var(--text-header); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${f.globalName}</div>
+                        <div style="font-size: 12px; color: var(--text-muted);">@${f.tag}</div>
+                    </div>
+                    <button onclick="event.stopPropagation(); removeFriendUI('${f.id}')" style="background: none; border: none; color: #f23f43; cursor: pointer; padding: 4px; border-radius: 4px;" title="Remove Friend">
+                        <i data-lucide="user-minus" style="width: 16px; height: 16px;"></i>
+                    </button>
+                `;
+                container.appendChild(el);
+            });
+            updateIcons();
+        }
+
+        async function removeFriendUI(userId) {
+            await window.electronAPI.removeFriend(userId);
+            renderFriendsList();
+        }
+
+        async function removeFriendByTagUI(tag) {
+            await window.electronAPI.removeFriendByTag(tag);
+            renderFriendsList();
+        }
+
+        async function renderPendingFriends() {
+            const container = document.getElementById('friends-list-container');
+            container.innerHTML = '<div style="color: var(--text-muted); padding: 12px;">Loading...</div>';
+            const requests = await window.electronAPI.getPendingFriendRequests();
+            container.innerHTML = '';
+            if (requests.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); padding: 24px; text-align: center;">No pending friend requests.</div>';
+                return;
+            }
+            for (const req of requests) {
+                const user = await window.electronAPI.getUserProfile(req.userId).catch(() => null);
+                const el = document.createElement('div');
+                el.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px;';
+                el.innerHTML = `
+                    <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                        <i data-lucide="user" style="width: 20px; height: 20px; color: var(--text-muted);"></i>
+                    </div>
+                    <div style="flex: 1; color: var(--text-header); font-weight: 600;">${user?.globalName || user?.username || req.userId}</div>
+                    <button onclick="acceptFriendReqUI('${req.userId}')" style="padding: 6px 16px; border-radius: 8px; border: none; background: var(--accent); color: white; cursor: pointer; font-size: 12px; font-weight: 600;">
+                        <i data-lucide="check" style="width: 14px; height: 14px;"></i> Accept
+                    </button>
+                    <button onclick="rejectFriendReqUI('${req.userId}')" style="padding: 6px 16px; border-radius: 8px; border: none; background: #f23f43; color: white; cursor: pointer; font-size: 12px; font-weight: 600;">
+                        <i data-lucide="x" style="width: 14px; height: 14px;"></i> Decline
+                    </button>
+                `;
+                container.appendChild(el);
+            }
+            updateIcons();
+        }
+
+        async function acceptFriendReqUI(userId) {
+            await window.electronAPI.acceptFriendRequest(userId);
+            renderPendingFriends();
+        }
+
+        async function rejectFriendReqUI(userId) {
+            await window.electronAPI.rejectFriendRequest(userId);
+            renderPendingFriends();
+        }
+
+        // ============ CALL HANDLING ============
+
+        function answerIncomingCall() {
+            if (!incomingCallChannelId) return;
+            window.electronAPI.answerCall(incomingCallChannelId);
+            document.getElementById('incoming-call-overlay').style.display = 'none';
+            incomingCallChannelId = null;
+        }
+
+        function rejectIncomingCall() {
+            if (incomingCallChannelId) {
+                window.electronAPI.endCall(incomingCallChannelId);
+            }
+            document.getElementById('incoming-call-overlay').style.display = 'none';
+            incomingCallChannelId = null;
+        }
+
+        function acceptPendingFriend() {
+            if (pendingRequestUserId) {
+                window.electronAPI.acceptFriendRequest(pendingRequestUserId);
+                pendingRequestUserId = null;
+            }
+            document.getElementById('friend-request-notification').classList.remove('show');
+            setTimeout(() => { document.getElementById('friend-request-notification').style.display = 'none'; }, 250);
+        }
+
+        function rejectPendingFriend() {
+            if (pendingRequestUserId) {
+                window.electronAPI.rejectFriendRequest(pendingRequestUserId);
+                pendingRequestUserId = null;
+            }
+            document.getElementById('friend-request-notification').classList.remove('show');
+            setTimeout(() => { document.getElementById('friend-request-notification').style.display = 'none'; }, 250);
         }
 
 
@@ -3657,6 +3987,43 @@
         // Titlebar window state (maximized class)
         window.electronAPI.onWindowStateChanged((isMaximized) => {
             document.getElementById('titlebar')?.classList.toggle('titlebar-maximized', isMaximized);
+        });
+
+        // Friend & Call event listeners
+        window.electronAPI.onIncomingCall((data) => {
+            incomingCallChannelId = data.channelId;
+            document.getElementById('incoming-caller-name').textContent = 'Incoming Call from User';
+            const overlay = document.getElementById('incoming-call-overlay');
+            overlay.style.display = 'flex';
+            setTimeout(() => overlay.classList.add('show'), 10);
+            window.electronAPI.getUserProfile(data.callerId).then(p => {
+                if (p) document.getElementById('incoming-caller-name').textContent = p.globalName || p.username;
+            }).catch(() => {});
+        });
+
+        window.electronAPI.onCallStateChange((data) => {
+            if (data.type === 'call_ended') {
+                document.getElementById('incoming-call-overlay').classList.remove('show');
+                setTimeout(() => { document.getElementById('incoming-call-overlay').style.display = 'none'; }, 250);
+            }
+        });
+
+        window.electronAPI.onFriendListUpdate(() => {
+            const fv = document.getElementById('friends-view');
+            if (fv && fv.style.display !== 'none') {
+                renderFriendsList();
+            }
+        });
+
+        window.electronAPI.onPendingFriendRequest((data) => {
+            pendingRequestUserId = data.userId;
+            const modal = document.getElementById('friend-request-notification');
+            document.getElementById('friend-request-user').textContent = data.userId;
+            modal.style.display = 'flex';
+            setTimeout(() => modal.classList.add('show'), 10);
+            window.electronAPI.getUserProfile(data.userId).then(p => {
+                if (p) document.getElementById('friend-request-user').textContent = p.globalName || p.username;
+            }).catch(() => {});
         });
 
         async function submitLoginToken() {

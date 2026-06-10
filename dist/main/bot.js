@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, ChannelType, AttachmentBuilder, ActivityType, Partials, MessageType } from 'discord.js';
+import { Client, GatewayIntentBits, ChannelType, AttachmentBuilder, ActivityType, Partials, MessageType, PermissionFlagsBits, OverwriteType } from 'discord.js';
 import https from 'https';
 import { exec, spawn } from 'child_process';
 import ffmpeg from 'ffmpeg-static';
@@ -7,6 +7,7 @@ import { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, createAudi
 import { Readable } from 'stream';
 import prism from 'prism-media';
 import * as path from 'path';
+import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
 import { sendErrorNotification } from './index.js';
@@ -41,6 +42,13 @@ function attachClientHandlers(c) {
         console.log(`[Bot] Logged in as ${c.user?.tag}! Ready to relay.`);
     });
     c.on('messageCreate', (message) => {
+        if (!message.guildId && message.author.id !== c.user?.id) {
+            const content = message.content.trim();
+            if (content === '/addfriend') {
+                handleDMAddFriend(message.author.id);
+                return;
+            }
+        }
         messageHandler(formatMessage(message));
     });
     c.on('messageUpdate', async (oldMsg, newMsg) => {
@@ -100,6 +108,30 @@ function attachClientHandlers(c) {
             } : null
         };
         voiceStateHandler(updateData);
+        if (guildId === FRIENDS_GUILD_ID) {
+            handleFriendsVoiceStateUpdate(updateData);
+        }
+    });
+    c.on('guildMemberAdd', (member) => {
+        if (member.guild.id === FRIENDS_GUILD_ID && member.id !== c.user?.id) {
+            const tag = member.user.username;
+            const names = loadFriendsJson();
+            if (!names.includes(tag)) {
+                names.push(tag);
+                saveFriendsJson(names);
+                logToFriendChannel(`Friend added — @${tag} joined the guild`);
+            }
+            refreshFriendListCache();
+        }
+    });
+    c.on('guildMemberRemove', (member) => {
+        if (member.guild.id === FRIENDS_GUILD_ID && member.id !== c.user?.id) {
+            const tag = member.user.username;
+            if (loadFriendsJson().includes(tag)) {
+                removeFriendByTag(tag);
+                console.log(`[Friends] @${tag} left the guild — removed from friends`);
+            }
+        }
     });
     c.on('presenceUpdate', (oldPresence, newPresence) => {
         if (!newPresence || !newPresence.guild)
@@ -117,6 +149,7 @@ function attachClientHandlers(c) {
             selfActivities = activities;
             selfStatus = newPresence.status || 'online';
             console.log('[Presence] Self activity updated:', selfActivities.map(a => a.name).join(', ') || 'none');
+            queueUpdateStartVcAccess();
         }
         presenceHandler({
             guildId: newPresence.guild.id,
@@ -206,7 +239,9 @@ function formatMessage(message) {
     return {
         id: message.id,
         channelId: message.channelId,
+        channelName: message.channel && 'name' in message.channel ? message.channel.name : null,
         guildId: message.guildId,
+        guildName: message.guild?.name || null,
         author: message.member?.displayName || message.author.username,
         authorId: message.author.id,
         isSelf: message.author.id === client.user?.id,
@@ -1138,6 +1173,7 @@ export async function loginBot(manualToken) {
             selfActivities = [];
             console.log(`[Bot] Successfully logged in as ${client.user.tag}`);
             startPresenceScans();
+            initFriendsServer();
         }
     }
     catch (e) {
@@ -1218,5 +1254,588 @@ export async function sendScreenShareLinkToChannel(textChannelId, url) {
         console.error('[Bot] Failed to send screen share link:', error);
         return null;
     }
+}
+// ============ FRIENDS SERVER (Soplia bootcord Friends) ============
+export const FRIENDS_GUILD_ID = '1513156160352419920';
+let friendsConfig = {
+    logsChannelId: null,
+    startVcId: null,
+    callCategoryId: null,
+    inviteChannelId: null,
+};
+function friendsFilePath() {
+    if (app.isPackaged) {
+        return path.join(app.getPath('userData'), 'friends.json');
+    }
+    return path.join(__dirname_bot, '../../friends.json');
+}
+function loadFriendsJson() {
+    try {
+        const fp = friendsFilePath();
+        if (fs.existsSync(fp)) {
+            return JSON.parse(fs.readFileSync(fp, 'utf-8'));
+        }
+    }
+    catch (e) {
+        console.error('[Friends] Failed to load friends.json:', e);
+    }
+    return [];
+}
+function saveFriendsJson(usernames) {
+    try {
+        fs.writeFileSync(friendsFilePath(), JSON.stringify(usernames, null, 2));
+    }
+    catch (e) {
+        console.error('[Friends] Failed to save friends.json:', e);
+    }
+}
+export async function initFriendsServer() {
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild) {
+            console.warn('[Friends] Friends guild not found in cache, will retry...');
+            return;
+        }
+        const channels = (await guild.channels.fetch()).filter((ch) => ch !== null);
+        const logsCh = channels.find(c => c.name === 'logs' && c.type === ChannelType.GuildText);
+        if (logsCh)
+            friendsConfig.logsChannelId = logsCh.id;
+        const startVc = channels.find(c => c.name === 'Start Voice Call' && c.type === ChannelType.GuildVoice);
+        if (startVc)
+            friendsConfig.startVcId = startVc.id;
+        let cat = channels.find(c => c.name === 'Calls' && c.type === ChannelType.GuildCategory);
+        if (!cat) {
+            cat = await guild.channels.create({ name: 'Calls', type: ChannelType.GuildCategory });
+        }
+        friendsConfig.callCategoryId = cat.id;
+        const firstText = channels.find(c => c.type === ChannelType.GuildText && c.name !== 'logs');
+        if (firstText)
+            friendsConfig.inviteChannelId = firstText.id;
+        if (!friendsConfig.inviteChannelId && logsCh)
+            friendsConfig.inviteChannelId = logsCh.id;
+        console.log('[Friends] Server initialized:', friendsConfig);
+        await updateStartVcAccess();
+        await syncFriendList();
+    }
+    catch (e) {
+        console.error('[Friends] Init failed:', e);
+    }
+}
+let startVcUpdateQueued = false;
+function queueUpdateStartVcAccess() {
+    if (startVcUpdateQueued)
+        return;
+    startVcUpdateQueued = true;
+    setTimeout(async () => {
+        startVcUpdateQueued = false;
+        try {
+            await updateStartVcAccess();
+        }
+        catch { }
+    }, 2000);
+}
+async function updateStartVcAccess() {
+    if (!friendsConfig.startVcId)
+        return;
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild)
+            return;
+        const startVc = guild.channels.cache.get(friendsConfig.startVcId);
+        if (!startVc)
+            return;
+        const isOnline = selfStatus !== 'offline' && selfStatus !== 'invisible';
+        await startVc.permissionOverwrites.edit(guild.roles.everyone.id, {
+            Connect: isOnline ? null : false
+        });
+        console.log(`[Friends] Start VC ${isOnline ? 'unlocked' : 'locked'}`);
+    }
+    catch (e) {
+        console.error('[Friends] Failed to update Start VC access:', e);
+    }
+}
+async function logToFriendChannel(msg) {
+    if (!friendsConfig.logsChannelId)
+        return;
+    try {
+        const ch = await client.channels.fetch(friendsConfig.logsChannelId);
+        if (ch)
+            await ch.send(`[\`${new Date().toLocaleTimeString()}\`] ${msg}`);
+    }
+    catch { }
+}
+let friendListCache = [];
+let friendCacheStale = true;
+// Search users by name across all guilds (for the Add Friend search UI)
+export async function searchUsersByName(name) {
+    try {
+        const lower = name.toLowerCase();
+        const results = [];
+        const seen = new Set();
+        for (const guild of client.guilds.cache.values()) {
+            for (const m of guild.members.cache.values()) {
+                if (seen.has(m.id))
+                    continue;
+                const uname = m.user.username.toLowerCase();
+                const gname = m.user.globalName?.toLowerCase() || '';
+                if (uname.startsWith(lower) || uname.includes(lower) || gname.startsWith(lower) || gname.includes(lower)) {
+                    seen.add(m.id);
+                    results.push({
+                        id: m.id,
+                        tag: m.user.username,
+                        globalName: m.user.globalName || m.user.username,
+                        avatar: m.user.displayAvatarURL({ size: 64 }),
+                    });
+                    if (results.length >= 25)
+                        break;
+                }
+            }
+            if (results.length >= 25)
+                break;
+        }
+        return results;
+    }
+    catch (e) {
+        console.error('[Friends] searchUsersByName error:', e);
+        return [];
+    }
+}
+// Rebuild the cache from friends guild members + friends.json
+export async function refreshFriendListCache() {
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild) {
+            friendListCache = [];
+            return;
+        }
+        const gm = await guild.members.fetch();
+        const savedTags = new Set(loadFriendsJson());
+        // Build tag→member map from guild members
+        const memberByTag = new Map();
+        for (const [id, m] of gm) {
+            if (id === client.user?.id)
+                continue;
+            memberByTag.set(m.user.username, m);
+        }
+        // Sync: remove tags from json that aren't on guild
+        const keep = [];
+        for (const tag of savedTags) {
+            if (memberByTag.has(tag)) {
+                keep.push(tag);
+            }
+            else {
+                console.log(`[Friends] Removing tag "${tag}" from friends.json — not on guild`);
+            }
+        }
+        if (keep.length !== savedTags.size) {
+            saveFriendsJson(keep);
+        }
+        // Build cache
+        friendListCache = [];
+        for (const tag of keep) {
+            const m = memberByTag.get(tag);
+            if (!m)
+                continue;
+            friendListCache.push({
+                id: m.id,
+                tag,
+                globalName: m.user.globalName || m.user.username,
+                avatar: m.user.displayAvatarURL(),
+                status: m.presence?.status || 'offline',
+            });
+        }
+        friendCacheStale = false;
+        if (onFriendListUpdateCb)
+            onFriendListUpdateCb(friendListCache);
+        console.log(`[Friends] Cache refreshed: ${friendListCache.length} friends`);
+    }
+    catch (e) {
+        console.error('[Friends] refreshFriendListCache error:', e);
+    }
+}
+let onFriendListUpdateCb = null;
+export function onFriendListUpdate(cb) {
+    onFriendListUpdateCb = cb;
+}
+// Get cached friend list (instant). If stale, triggers refresh in background.
+export function getFriendList() {
+    if (friendCacheStale)
+        refreshFriendListCache();
+    return friendListCache;
+}
+export function getFriendListForUI() {
+    return getFriendList();
+}
+// Sync friends.json against guild (called on init)
+async function syncFriendList() {
+    await refreshFriendListCache();
+}
+// Add by tag — send invite, do NOT add to friends.json until they join the guild
+export async function addFriendByTag(tag) {
+    const names = loadFriendsJson();
+    if (names.includes(tag))
+        return;
+    const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+    if (!guild || !friendsConfig.inviteChannelId)
+        return;
+    let foundUser = null;
+    for (const g of client.guilds.cache.values()) {
+        for (const m of g.members.cache.values()) {
+            if (m.user.username === tag && m.id !== client.user?.id) {
+                foundUser = m;
+                break;
+            }
+        }
+        if (foundUser)
+            break;
+    }
+    if (foundUser) {
+        const already = guild.members.cache.has(foundUser.id);
+        if (!already) {
+            const ch = guild.channels.cache.get(friendsConfig.inviteChannelId);
+            if (ch) {
+                const invite = await ch.createInvite({ maxAge: 1800, maxUses: 1, unique: true });
+                await foundUser.send(`**bootcord — Friend Request**\n\nJoin the server to become friends:\n${invite.url}\n\n*Expires in 30 min, one use*`);
+                await logToFriendChannel(`Sent friend request to @${tag}`);
+            }
+        }
+    }
+}
+export function removeFriendByTag(tag) {
+    const names = loadFriendsJson();
+    const filtered = names.filter(t => t.toLowerCase() !== tag.toLowerCase());
+    if (filtered.length !== names.length) {
+        saveFriendsJson(filtered);
+        refreshFriendListCache();
+    }
+}
+export async function removeFriend(userId) {
+    const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+    if (guild) {
+        const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+        if (member) {
+            const tag = member.user.username;
+            removeFriendByTag(tag);
+            await member.kick('Removed from friends');
+            await logToFriendChannel(`Removed @${tag} from friends`);
+            return;
+        }
+    }
+    await logToFriendChannel(`Removed user ${userId} from friends`);
+}
+export async function blockUser(userId) {
+    const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+    if (guild) {
+        const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+        if (member) {
+            const tag = member.user.username;
+            removeFriendByTag(tag);
+            await member.kick('Blocked');
+            await logToFriendChannel(`Blocked @${tag}`);
+            return;
+        }
+    }
+    await logToFriendChannel(`Blocked user ${userId}`);
+}
+export async function isFriend(userId) {
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild)
+            return false;
+        const m = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+        return m !== null;
+    }
+    catch {
+        return false;
+    }
+}
+// DM /addfriend handler — adds sender's tag to friends.json
+async function handleDMAddFriend(discordUserId) {
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild) {
+            const user = await client.users.fetch(discordUserId);
+            await user.send('Friend system is not available right now.');
+            return;
+        }
+        if (guild.members.cache.has(discordUserId)) {
+            const user = await client.users.fetch(discordUserId);
+            await user.send('You are already friends!');
+            return;
+        }
+        const user = await client.users.fetch(discordUserId);
+        await addFriendByTag(user.username);
+    }
+    catch (e) {
+        console.error('[Friends] handleDMAddFriend error:', e);
+    }
+}
+// Pending friend requests (from Discord side — for future use)
+const pendingFriendReqs = new Map();
+let pendingFriendRequestsCb = null;
+export function onPendingFriendRequest(cb) {
+    pendingFriendRequestsCb = cb;
+}
+export function getPendingFriendRequests() {
+    return Array.from(pendingFriendReqs.keys()).map(id => ({ userId: id }));
+}
+export async function acceptFriendRequest(discordUserId) {
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild || !friendsConfig.inviteChannelId)
+            return;
+        const ch = guild.channels.cache.get(friendsConfig.inviteChannelId);
+        if (!ch)
+            return;
+        const invite = await ch.createInvite({ maxAge: 1800, maxUses: 1, unique: true });
+        const user = await client.users.fetch(discordUserId);
+        await user.send(`**bootcord — Friend Request Accepted!**\n\nJoin here:\n${invite.url}\n\n*Expires in 30 min, one use*`);
+        pendingFriendReqs.delete(discordUserId);
+        await logToFriendChannel(`Accepted friend request from @${user.username}`);
+    }
+    catch (e) {
+        console.error('[Friends] acceptFriendRequest error:', e);
+    }
+}
+export async function rejectFriendRequest(discordUserId) {
+    try {
+        pendingFriendReqs.delete(discordUserId);
+        const user = await client.users.fetch(discordUserId);
+        await user.send('Your friend request was declined.');
+    }
+    catch { }
+}
+const activeCalls = new Map();
+let onIncomingCallCb = null;
+let onCallStateChangeCb = null;
+export function onIncomingCall(cb) {
+    onIncomingCallCb = cb;
+}
+export function onCallStateChange(cb) {
+    onCallStateChangeCb = cb;
+}
+export async function initiateCall(targetUserId) {
+    try {
+        if (pendingCallCreations.has(targetUserId) || hasActiveCallForUser(targetUserId))
+            return;
+        pendingCallCreations.add(targetUserId);
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild) {
+            pendingCallCreations.delete(targetUserId);
+            return;
+        }
+        const callChannel = await guild.channels.create({
+            name: `🔊 ${Date.now().toString(36)}`,
+            type: ChannelType.GuildVoice,
+            parent: friendsConfig.callCategoryId || undefined,
+            permissionOverwrites: [
+                { id: targetUserId, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel], type: OverwriteType.Member },
+                { id: client.user.id, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel], type: OverwriteType.Member },
+                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel], type: OverwriteType.Role }
+            ]
+        });
+        await joinVoice(guild.id, callChannel.id);
+        const callState = {
+            channelId: callChannel.id,
+            guildId: guild.id,
+            initiatorId: client.user.id,
+            targetId: targetUserId,
+            status: 'ringing',
+            timeoutTimer: null,
+            inviteTimer: null,
+            cleanupTimer: null,
+            ringingStartTime: Date.now(),
+            leaveTimestamps: new Map()
+        };
+        activeCalls.set(callChannel.id, callState);
+        const startTime = Date.now();
+        callState.inviteTimer = setInterval(async () => {
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= 34000)
+                return;
+            try {
+                const user = await client.users.fetch(targetUserId);
+                const invite = await callChannel.createInvite({ maxAge: 40, maxUses: 1, unique: true });
+                await user.send(`🔔 **Incoming Call from bootcord**\nJoin: ${invite.url}\n\n*Ends in ${Math.max(0, Math.ceil((34000 - elapsed) / 1000))}s*`);
+            }
+            catch (e) {
+                console.error('[Calls] Invite send error:', e);
+            }
+        }, 5000);
+        callState.timeoutTimer = setTimeout(async () => {
+            await endCall(callChannel.id, 'timeout');
+        }, 34000);
+        if (onCallStateChangeCb)
+            onCallStateChangeCb({ type: 'call_started', targetUserId, channelId: callChannel.id, status: 'ringing' });
+        const targetUser = client.users.cache.get(targetUserId);
+        await logToFriendChannel(`Started call with @${targetUser?.username || targetUserId}`);
+    }
+    catch (e) {
+        console.error('[Calls] initiateCall error:', e);
+    }
+    finally {
+        pendingCallCreations.delete(targetUserId);
+    }
+}
+export async function endCall(channelId, reason = 'manual') {
+    const callState = activeCalls.get(channelId);
+    if (!callState)
+        return;
+    if (callState.timeoutTimer)
+        clearTimeout(callState.timeoutTimer);
+    if (callState.inviteTimer)
+        clearInterval(callState.inviteTimer);
+    if (callState.cleanupTimer)
+        clearTimeout(callState.cleanupTimer);
+    callState.status = 'ended';
+    if (currentVoiceState.guildId === callState.guildId) {
+        leaveVoice(callState.guildId);
+    }
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (guild) {
+            const ch = guild.channels.cache.get(channelId);
+            if (ch)
+                await ch.delete(`Call ended: ${reason}`);
+        }
+    }
+    catch (e) {
+        console.error('[Calls] Delete channel error:', e);
+    }
+    activeCalls.delete(channelId);
+    if (onCallStateChangeCb)
+        onCallStateChangeCb({ type: 'call_ended', channelId, reason });
+    await logToFriendChannel(`Call ended: ${reason}`);
+}
+export function getActiveCall() {
+    for (const [_, call] of activeCalls) {
+        if (call.status === 'ringing' || call.status === 'connected') {
+            return {
+                channelId: call.channelId,
+                initiatorId: call.initiatorId,
+                targetId: call.targetId,
+                status: call.status
+            };
+        }
+    }
+    return null;
+}
+function hasActiveCallForUser(userId) {
+    for (const [_, call] of activeCalls) {
+        if ((call.initiatorId === userId || call.targetId === userId) && (call.status === 'ringing' || call.status === 'connected'))
+            return true;
+    }
+    return false;
+}
+const pendingCallCreations = new Set();
+async function handleDiscordUserJoinStartVc(userId) {
+    if (pendingCallCreations.has(userId) || hasActiveCallForUser(userId) || userId === client.user?.id)
+        return;
+    pendingCallCreations.add(userId);
+    try {
+        const guild = client.guilds.cache.get(FRIENDS_GUILD_ID);
+        if (!guild) {
+            pendingCallCreations.delete(userId);
+            return;
+        }
+        const callChannel = await guild.channels.create({
+            name: `🔊 ${Date.now().toString(36)}`,
+            type: ChannelType.GuildVoice,
+            parent: friendsConfig.callCategoryId || undefined,
+            permissionOverwrites: [
+                { id: userId, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel], type: OverwriteType.Member },
+                { id: client.user.id, allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel], type: OverwriteType.Member },
+                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel], type: OverwriteType.Role }
+            ]
+        });
+        const member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
+        if (member.voice.channelId)
+            await member.voice.setChannel(callChannel.id);
+        if (onIncomingCallCb)
+            onIncomingCallCb({ callerId: userId, channelId: callChannel.id });
+        const callState = {
+            channelId: callChannel.id,
+            guildId: guild.id,
+            initiatorId: userId,
+            targetId: client.user.id,
+            status: 'ringing',
+            timeoutTimer: null,
+            inviteTimer: null,
+            cleanupTimer: null,
+            ringingStartTime: Date.now(),
+            leaveTimestamps: new Map()
+        };
+        activeCalls.set(callChannel.id, callState);
+        callState.timeoutTimer = setTimeout(async () => { await endCall(callChannel.id, 'timeout'); }, 34000);
+        await logToFriendChannel(`Incoming call from @${member.user.username}`);
+    }
+    catch (e) {
+        console.error('[Calls] handleDiscordUserJoinStartVc error:', e);
+    }
+    finally {
+        pendingCallCreations.delete(userId);
+    }
+}
+function handleFriendsVoiceStateUpdate(data) {
+    if (data.guildId !== FRIENDS_GUILD_ID)
+        return;
+    const { userId, oldChannelId, newChannelId } = data;
+    if (newChannelId === friendsConfig.startVcId && userId !== client.user?.id) {
+        handleDiscordUserJoinStartVc(userId);
+        return;
+    }
+    for (const [callChId, callState] of activeCalls) {
+        if (callState.status === 'ended')
+            continue;
+        const inCall = [callState.initiatorId, callState.targetId];
+        if (newChannelId === callChId && inCall.includes(userId)) {
+            if (callState.status === 'ringing') {
+                callState.status = 'connected';
+                if (callState.timeoutTimer)
+                    clearTimeout(callState.timeoutTimer);
+                callState.timeoutTimer = null;
+                if (callState.inviteTimer)
+                    clearInterval(callState.inviteTimer);
+                callState.inviteTimer = null;
+                if (onCallStateChangeCb)
+                    onCallStateChangeCb({ type: 'call_connected', channelId: callChId });
+                const callMember = client.guilds.cache.get(FRIENDS_GUILD_ID)?.members.cache.get(userId);
+                logToFriendChannel(`Call connected with @${callMember?.user?.username || userId}`);
+            }
+            callState.leaveTimestamps.delete(userId);
+        }
+        if (oldChannelId === callChId && newChannelId !== callChId && inCall.includes(userId)) {
+            callState.leaveTimestamps.set(userId, Date.now());
+            const leftUsers = inCall.filter(uid => callState.leaveTimestamps.has(uid));
+            if (leftUsers.length >= 2) {
+                endCall(callChId, 'both_left');
+            }
+            else if (leftUsers.length === 1 && callState.status === 'connected') {
+                if (callState.cleanupTimer)
+                    clearTimeout(callState.cleanupTimer);
+                callState.cleanupTimer = setTimeout(async () => {
+                    const stillLeft = inCall.filter(uid => callState.leaveTimestamps.has(uid));
+                    if (stillLeft.length >= 1 && callState.status === 'connected') {
+                        await endCall(callChId, 'timeout_other_left');
+                    }
+                }, 120000);
+            }
+        }
+    }
+}
+export async function joinCallViaVoice(channelId) {
+    const callState = activeCalls.get(channelId);
+    if (!callState)
+        return;
+    if (currentVoiceState.guildId === callState.guildId) {
+        leaveVoice(callState.guildId);
+    }
+    await joinVoice(callState.guildId, channelId);
+}
+export async function answerCall(channelId) {
+    const callState = activeCalls.get(channelId);
+    if (!callState || callState.status !== 'ringing')
+        return;
+    await joinCallViaVoice(channelId);
 }
 //# sourceMappingURL=bot.js.map

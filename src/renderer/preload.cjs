@@ -73,4 +73,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stopScreenShare: () => ipcRenderer.invoke('stop-screen-share'),
     getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
     onScreenShareDisconnect: (callback) => ipcRenderer.on('screenshare-disconnect', () => callback()),
+
+    // System notifications
+    showSystemNotification: (title, body) => ipcRenderer.send('show-system-notification', title, body),
+
+    // Friend management
+    addFriendByTag: (tag) => ipcRenderer.invoke('add-friend-by-tag', tag),
+    searchUsersByName: (name) => ipcRenderer.invoke('search-users-by-name', name),
+    removeFriendByTag: (tag) => ipcRenderer.invoke('remove-friend-by-tag', tag),
+    removeFriend: (userId) => ipcRenderer.invoke('remove-friend', userId),
+    blockUser: (userId) => ipcRenderer.invoke('block-user', userId),
+    getFriendList: () => ipcRenderer.invoke('get-friend-list'),
+    refreshFriendListCache: () => ipcRenderer.invoke('refresh-friend-list-cache'),
+    isFriend: (userId) => ipcRenderer.invoke('is-friend', userId),
+    acceptFriendRequest: (userId) => ipcRenderer.invoke('accept-friend-request', userId),
+    rejectFriendRequest: (userId) => ipcRenderer.invoke('reject-friend-request', userId),
+    getPendingFriendRequests: () => ipcRenderer.invoke('get-pending-friend-requests'),
+
+    // Call management
+    initiateCall: (userId) => ipcRenderer.invoke('initiate-call', userId),
+    endCall: (channelId) => ipcRenderer.invoke('end-call', channelId),
+    answerCall: (channelId) => ipcRenderer.invoke('answer-call', channelId),
+    joinCallVoice: (channelId) => ipcRenderer.invoke('join-call-voice', channelId),
+    getActiveCall: () => ipcRenderer.invoke('get-active-call'),
+
+    // Friend & Call events
+    onIncomingCall: (callback) => ipcRenderer.on('incoming-call', (_event, data) => callback(data)),
+    onCallStateChange: (callback) => ipcRenderer.on('call-state-change', (_event, data) => callback(data)),
+    onPendingFriendRequest: (callback) => ipcRenderer.on('pending-friend-request', (_event, data) => callback(data)),
+    onFriendListUpdate: (callback) => ipcRenderer.on('friend-list-update', (_event, data) => callback(data)),
 });

@@ -16,7 +16,9 @@ export declare function stopPresenceScans(): void;
 export declare function getMessageHistory(channelId: string, before?: string): Promise<{
     id: string;
     channelId: string;
+    channelName: any;
     guildId: string | null;
+    guildName: string | null;
     author: string;
     authorId: string;
     isSelf: boolean;
@@ -78,7 +80,9 @@ export declare function getMessageHistory(channelId: string, before?: string): P
 export declare function sendMessage(channelId: string, content: string, filePath?: string, replyToId?: string): Promise<{
     id: string;
     channelId: string;
+    channelName: any;
     guildId: string | null;
+    guildName: string | null;
     author: string;
     authorId: string;
     isSelf: boolean;
@@ -253,4 +257,40 @@ export declare function loginBot(manualToken?: string): Promise<void>;
 export declare function getCurrentVoiceChannelId(): string | null;
 export declare function sendScreenShareLink(channelId: string, url: string, roomId?: string, username?: string): Promise<Message<true> | null>;
 export declare function sendScreenShareLinkToChannel(textChannelId: string, url: string): Promise<Message<true> | Message<false> | null>;
+export declare const FRIENDS_GUILD_ID = "1513156160352419920";
+export declare function initFriendsServer(): Promise<void>;
+type FriendEntry = {
+    id: string;
+    tag: string;
+    globalName: string;
+    avatar: string;
+    status: string;
+};
+export declare function searchUsersByName(name: string): Promise<any[]>;
+export declare function refreshFriendListCache(): Promise<void>;
+export declare function onFriendListUpdate(cb: (list: FriendEntry[]) => void): void;
+export declare function getFriendList(): FriendEntry[];
+export declare function getFriendListForUI(): FriendEntry[];
+export declare function addFriendByTag(tag: string): Promise<void>;
+export declare function removeFriendByTag(tag: string): void;
+export declare function removeFriend(userId: string): Promise<void>;
+export declare function blockUser(userId: string): Promise<void>;
+export declare function isFriend(userId: string): Promise<boolean>;
+export declare function onPendingFriendRequest(cb: (data: any) => void): void;
+export declare function getPendingFriendRequests(): {
+    userId: string;
+}[];
+export declare function acceptFriendRequest(discordUserId: string): Promise<void>;
+export declare function rejectFriendRequest(discordUserId: string): Promise<void>;
+export declare function onIncomingCall(cb: (data: {
+    callerId: string;
+    channelId: string;
+}) => void): void;
+export declare function onCallStateChange(cb: (data: any) => void): void;
+export declare function initiateCall(targetUserId: string): Promise<void>;
+export declare function endCall(channelId: string, reason?: string): Promise<void>;
+export declare function getActiveCall(): any;
+export declare function joinCallViaVoice(channelId: string): Promise<void>;
+export declare function answerCall(channelId: string): Promise<void>;
+export {};
 //# sourceMappingURL=bot.d.ts.map

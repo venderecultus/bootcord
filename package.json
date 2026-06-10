@@ -1,13 +1,13 @@
 {
   "name": "bootcord",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Premium discord client alternative",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc && xcopy /E /I /Y src\\main\\screen-share dist\\main\\screen-share",
     "start": "npm run build && electron .",
     "watch": "tsc -w",
-    "pack-unpacked": "npx electron-builder --win dir --config.win.target=dir --config.directories.output=release --config.extraResources=mic.py --config.asar=true --config.asarUnpack=\"**/node_modules/ffmpeg-static/**/*\" --config.files=dist/**/* --config.files=src/renderer/**/* --config.files=src/sounds/**/* --config.files=src/icon.png --config.files=package.json --config.appId=com.nutbrothers.bootcord --config.productName=bootcord --config.win.icon=src/icon.png",
+    "pack-unpacked": "npx electron-builder --win dir --config.win.target=dir --config.directories.output=release --config.extraResources=mic.py --config.asar=true --config.asarUnpack=\"**/node_modules/ffmpeg-static/**/*\" --config.files=dist/**/* --config.files=src/renderer/**/* --config.files=src/sounds/**/* --config.files=src/icon.png --config.files=package.json --config.appId=bootcord --config.productName=bootcord --config.win.icon=src/icon.png",
     "release": "npm run build && npm run pack-unpacked && npm run vpk-pack",
     "vpk-pack": "node scripts/vpk-pack.mjs",
     "dist": "npm run release"

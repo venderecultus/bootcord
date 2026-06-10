@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, desktopCapturer } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell, desktopCapturer, Notification } from 'electron';
 import * as https from 'https';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -97,7 +97,8 @@ function createTray() {
         { type: 'separator' },
         { label: 'Exit', click: () => {
                 isQuitting = true;
-                app.quit();
+                bot.leaveVoice('');
+                setTimeout(() => app.quit(), 200);
             } }
     ]);
     tray.setToolTip('bootcord');
@@ -161,6 +162,15 @@ function initBotHandlers() {
     });
     bot.onAudioData((data) => {
         mainWindow?.webContents.send('audio-from-discord', data);
+    });
+    bot.onIncomingCall((data) => {
+        mainWindow?.webContents.send('incoming-call', data);
+    });
+    bot.onCallStateChange((data) => {
+        mainWindow?.webContents.send('call-state-change', data);
+    });
+    bot.onPendingFriendRequest((data) => {
+        mainWindow?.webContents.send('pending-friend-request', data);
     });
 }
 ipcMain.handle('get-servers', () => bot.getServers());
@@ -456,4 +466,31 @@ ipcMain.handle('resolve-tenor-url', async (_, mediaUrl) => {
         return mediaUrl;
     }
 });
+// System notifications
+ipcMain.on('show-system-notification', (_, title, body) => {
+    if (Notification.isSupported()) {
+        new Notification({ title, body, icon: path.join(__dirname, '..', 'icon.png') }).show();
+    }
+});
+// Friend management
+ipcMain.handle('add-friend-by-tag', (_, tag) => bot.addFriendByTag(tag));
+ipcMain.handle('search-users-by-name', (_, name) => bot.searchUsersByName(name));
+ipcMain.handle('remove-friend-by-tag', (_, tag) => { bot.removeFriendByTag(tag); return true; });
+ipcMain.handle('remove-friend', (_, userId) => bot.removeFriend(userId));
+ipcMain.handle('block-user', (_, userId) => bot.blockUser(userId));
+ipcMain.handle('get-friend-list', () => bot.getFriendListForUI());
+ipcMain.handle('refresh-friend-list-cache', () => bot.refreshFriendListCache());
+ipcMain.handle('is-friend', (_, userId) => bot.isFriend(userId));
+ipcMain.handle('accept-friend-request', (_, userId) => bot.acceptFriendRequest(userId));
+ipcMain.handle('reject-friend-request', (_, userId) => bot.rejectFriendRequest(userId));
+ipcMain.handle('get-pending-friend-requests', () => bot.getPendingFriendRequests());
+bot.onFriendListUpdate((data) => {
+    mainWindow?.webContents.send('friend-list-update', data);
+});
+// Call management
+ipcMain.handle('initiate-call', (_, userId) => bot.initiateCall(userId));
+ipcMain.handle('end-call', (_, channelId) => bot.endCall(channelId));
+ipcMain.handle('answer-call', (_, channelId) => bot.answerCall(channelId));
+ipcMain.handle('get-active-call', () => bot.getActiveCall());
+ipcMain.handle('join-call-voice', (_, channelId) => bot.joinCallViaVoice(channelId));
 //# sourceMappingURL=index.js.map
