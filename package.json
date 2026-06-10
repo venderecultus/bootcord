@@ -1,6 +1,6 @@
 {
   "name": "bootcord",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Premium discord client alternative",
   "main": "dist/main/index.js",
   "scripts": {
