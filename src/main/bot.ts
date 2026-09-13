@@ -215,6 +215,8 @@ let lastActiveTextChannelId: string | null = null; // Store last used text chann
 
 let steamInterval: NodeJS.Timeout | null = null;
 let gameInterval: NodeJS.Timeout | null = null;
+let micRestartTimer: NodeJS.Timeout | null = null;
+let micHealthTimer: NodeJS.Timeout | null = null;
 
 let micSettings = {
     volume: 1.0,
@@ -906,6 +908,15 @@ function startPythonMic() {
 
     if (micProcess) return; // already running!
 
+    if (micRestartTimer) {
+        clearTimeout(micRestartTimer);
+        micRestartTimer = null;
+    }
+    if (micHealthTimer) {
+        clearTimeout(micHealthTimer);
+        micHealthTimer = null;
+    }
+
     console.log(`Spawning Python mic process (Vol: ${micSettings.volume}, Dev: ${micSettings.deviceId})...`);
     
     // In production, mic.py is an extraResource (placed in resources folder)
@@ -919,9 +930,24 @@ function startPythonMic() {
         args.push('--device', micSettings.deviceId);
     }
     
-    micProcess = spawn('python', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn('python', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    micProcess = proc;
 
-    micProcess.stdout?.on('data', (chunk) => {
+    const armMicHealthCheck = () => {
+        if (micHealthTimer) clearTimeout(micHealthTimer);
+        micHealthTimer = setTimeout(() => {
+            if (micProcess !== proc) return;
+            if (!currentVoiceState.channelId) return;
+            console.warn('[Python Mic] No audio output for 10s, restarting mic process...');
+            stopPythonMic();
+            micRestartTimer = setTimeout(() => startPythonMic(), 500);
+        }, 10000);
+    };
+
+    armMicHealthCheck();
+
+    proc.stdout?.on('data', (chunk) => {
+        armMicHealthCheck();
         if (currentVoiceState.selfMute) return;
         
         if (activeAudioStream && !activeAudioStream.destroyed) {
@@ -929,7 +955,7 @@ function startPythonMic() {
         }
     });
 
-    micProcess.stderr?.on('data', (data) => {
+    proc.stderr?.on('data', (data) => {
         const message = data.toString().trim();
         console.log(`[Python Mic Log]: ${message}`);
         
@@ -939,25 +965,40 @@ function startPythonMic() {
         }
     });
 
-    micProcess.on('error', (error) => {
+    proc.on('error', (error) => {
         console.error('[Python Mic Error]:', error);
         sendErrorNotification('Microphone Issues', error.message || String(error), 'microphone');
     });
 
-    micProcess.on('close', (code) => {
+    proc.on('close', (code) => {
         console.log(`Python mic process exited with code ${code}`);
-        if (micProcess) {
-            // Unexpected exit, clear and auto-restart if still in a channel
+        if (micProcess === proc) {
             micProcess = null;
+            if (micHealthTimer) {
+                clearTimeout(micHealthTimer);
+                micHealthTimer = null;
+            }
             if (currentVoiceState.channelId) {
                 console.log('Restarting mic process in 2 seconds...');
-                setTimeout(startPythonMic, 2000);
+                if (micRestartTimer) clearTimeout(micRestartTimer);
+                micRestartTimer = setTimeout(() => {
+                    micRestartTimer = null;
+                    startPythonMic();
+                }, 2000);
             }
         }
     });
 }
 
 function stopPythonMic() {
+    if (micRestartTimer) {
+        clearTimeout(micRestartTimer);
+        micRestartTimer = null;
+    }
+    if (micHealthTimer) {
+        clearTimeout(micHealthTimer);
+        micHealthTimer = null;
+    }
     if (micProcess) {
         console.log('Stopping Python mic process...');
         micProcess.kill();
