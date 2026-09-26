@@ -154,18 +154,21 @@ const GITHUB_REPO = 'bootcord';
 const GITHUB_BRANCH = 'main';
 const GITHUB_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`;
 const UPDATE_ROOT = path.resolve(__dirname, '../..');
+const BUILD_COMMIT_PATH = path.join(UPDATE_ROOT, 'build-commit.txt');
 const UPDATE_EXCLUDES = new Set([
     '.git', 'node_modules', 'graphify-out', 'release', 'coverage', '.env', 'dist',
 ]);
 
 type GitHubTreeEntry = { path: string; type: string; mode: string; sha: string; size?: number };
-let availableUpdate: { version: string; files: GitHubTreeEntry[]; stagePath?: string } | null = null;
+let availableUpdate: { version: string; commit: string; files: GitHubTreeEntry[]; stagePath?: string } | null = null;
 
 async function checkForGitHubUpdates(): Promise<boolean> {
     try {
         const remote = await getRemoteTree();
-        const changed = await getChangedFiles(remote.files);
-        availableUpdate = changed.length ? { version: remote.version, files: changed } : null;
+        const localCommit = (await fs.promises.readFile(BUILD_COMMIT_PATH, 'utf8')).trim();
+        availableUpdate = localCommit.toLowerCase() !== remote.commit.toLowerCase()
+            ? { version: remote.version, commit: remote.commit, files: remote.files }
+            : null;
         if (availableUpdate) mainWindow?.webContents.send('update-available', remote.version);
         else mainWindow?.webContents.send('update-not-available');
         return Boolean(availableUpdate);
@@ -219,27 +222,13 @@ function getLocalGitBlobSha(content: Buffer): string {
     return crypto.createHash('sha1').update(Buffer.concat([header, content])).digest('hex');
 }
 
-async function getRemoteTree(): Promise<{ version: string; files: GitHubTreeEntry[] }> {
+async function getRemoteTree(): Promise<{ version: string; commit: string; files: GitHubTreeEntry[] }> {
     const branch = JSON.parse((await githubRequest(`${GITHUB_API}/branches/${GITHUB_BRANCH}`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
     const commit = branch.commit.sha as string;
     const tree = JSON.parse((await githubRequest(`${GITHUB_API}/git/trees/${commit}?recursive=1`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
     if (tree.truncated) throw new Error('GitHub tree is too large to update safely');
     const files = (tree.tree as GitHubTreeEntry[]).filter((entry) => entry.type === 'blob' && entry.mode !== '120000' && isUpdatePathAllowed(entry.path));
-    return { version: commit.slice(0, 7), files };
-}
-
-async function getChangedFiles(remoteFiles: GitHubTreeEntry[]): Promise<GitHubTreeEntry[]> {
-    const changed: GitHubTreeEntry[] = [];
-    for (const entry of remoteFiles) {
-        const localPath = resolveUpdatePath(UPDATE_ROOT, entry.path);
-        try {
-            const local = await fs.promises.readFile(localPath);
-            if (getLocalGitBlobSha(local) !== entry.sha) changed.push(entry);
-        } catch {
-            changed.push(entry);
-        }
-    }
-    return changed;
+    return { version: commit.slice(0, 7), commit, files };
 }
 
 function startUpdateApplier(stagePath: string): void {
@@ -566,6 +555,8 @@ ipcMain.handle('download-update', async () => {
         const results = await Promise.allSettled(Array.from({ length: Math.min(5, update.files.length) }, downloadWorker));
         const failedDownload = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
         if (failedDownload) throw failedDownload.reason;
+        const commitPath = resolveUpdatePath(stagePath, 'build-commit.txt');
+        await fs.promises.writeFile(commitPath, `${update.commit}\n`, 'utf8');
         availableUpdate = { ...update, stagePath };
         mainWindow?.webContents.send('update-downloaded');
         return true;
