@@ -9,10 +9,10 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/@twemoji/api@14.1.0/dist/twemoji.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@twemoji/api@14.1.0/dist/twemoji.min.js"></script>
+    <script defer src="https://unpkg.com/lucide@latest"></script>
     <link href="https://vjs.zencdn.net/8.23.4/video-js.css" rel="stylesheet">
-    <script src="https://vjs.zencdn.net/8.23.4/video.min.js"></script>
+    <script defer src="https://vjs.zencdn.net/8.23.4/video.min.js"></script>
     <link rel="stylesheet" href="styles/main.css">
 </head>
 
@@ -72,18 +72,10 @@
     </div>
 
     <div class="server-list">
-        <div id="friends-icon" class="server-icon" onclick="toggleFriendsView()" title="Friends"
-            style="margin-bottom: 4px;">
-            <i data-lucide="users" style="width: 28px; height: 28px; color: var(--text-muted);"></i>
-            <div class="active-indicator" id="friends-indicator" style="height: 0; opacity: 0;"></div>
-        </div>
         <div id="server-list"></div>
-        <div
-            style="margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 20px;">
-            <div id="update-btn" onclick="startUpdate()" title="Checking for updates..." class="server-icon util-icon">
-                <i data-lucide="arrow-up-circle"></i></div>
-            <div id="reload-btn" class="server-icon util-icon" onclick="reloadUI()" title="Reload UI"><i
-                    data-lucide="refresh-cw"></i></div>
+        <div style="margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 20px;">
+            <div id="update-btn" onclick="startUpdate()" title="Checking for updates..." class="server-icon util-icon"><i data-lucide="arrow-up-circle"></i></div>
+            <div id="reload-btn" class="server-icon util-icon" onclick="reloadUI()" title="Reload UI"><i data-lucide="refresh-cw"></i></div>
         </div>
     </div>
     <div class="channel-sidebar" style="position: relative; display: flex; flex-direction: column;">
@@ -242,65 +234,6 @@
         <div id="member-list" style="padding: 0 8px;"></div>
     </div>
 
-    <!-- Friends View -->
-    <div id="friends-view" class="main-content" style="display: none;">
-        <div class="chat-header">
-            <div style="font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 12px;">
-                <i data-lucide="users" style="width: 22px; height: 22px; color: var(--accent);"></i>
-                Friends
-            </div>
-        </div>
-        <div style="flex: 1; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; gap: 12px;">
-            <div style="display: flex; gap: 12px; align-items: center; position: relative;">
-                <div style="flex: 1; position: relative;">
-                    <input type="text" id="friend-add-input" placeholder="Search by name..."
-                        oninput="onFriendSearchInput(this.value)"
-                        style="width: 100%; background: #1e1f22; border: none; border-radius: 8px; padding: 10px 14px; color: #dbdee1; outline: none; font-size: 14px;">
-                    <div id="friend-search-results" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #2b2d31; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; margin-top: 4px; max-height: 300px; overflow-y: auto; z-index: 100;"></div>
-                </div>
-            </div>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <div id="friends-tab-all" class="settings-btn-muted" style="background: var(--accent); color: #fff;" onclick="switchFriendsTab('all')">All Friends</div>
-                <div id="friends-tab-pending" class="settings-btn-muted" onclick="switchFriendsTab('pending')">Pending</div>
-            </div>
-            <div id="friends-list-container" style="flex: 1; display: flex; flex-direction: column; gap: 4px;"></div>
-        </div>
-    </div>
-
-    <!-- Incoming Call Overlay -->
-    <div id="incoming-call-overlay" class="modal-container" style="display: none; z-index: 30000; align-items: flex-start; padding-top: 80px;">
-        <div style="background: var(--glass-bg); backdrop-filter: var(--glass-blur); border: var(--glass-border); border-radius: var(--radius-lg); padding: 32px; width: 360px; text-align: center; display: flex; flex-direction: column; gap: 16px;">
-            <div style="font-size: 40px; color: var(--accent);"><i data-lucide="phone-call" style="width: 48px; height: 48px;"></i></div>
-            <div id="incoming-caller-name" style="font-size: 20px; font-weight: 700; color: var(--text-header);">Incoming Call</div>
-            <div style="color: var(--text-muted); font-size: 14px;">from bootcord</div>
-            <div style="display: flex; gap: 16px; justify-content: center;">
-                <button onclick="rejectIncomingCall()" style="width: 64px; height: 64px; border-radius: 50%; border: none; background: #f23f43; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                    <i data-lucide="phone-off" style="width: 28px; height: 28px;"></i>
-                </button>
-                <button onclick="answerIncomingCall()" style="width: 64px; height: 64px; border-radius: 50%; border: none; background: #23a55a; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                    <i data-lucide="phone" style="width: 28px; height: 28px;"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Friend Request Notification Modal -->
-    <div id="friend-request-notification" class="modal-container" style="display: none; z-index: 30001; align-items: flex-start; padding-top: 80px;">
-        <div style="background: var(--glass-bg); backdrop-filter: var(--glass-blur); border: var(--glass-border); border-radius: var(--radius-lg); padding: 32px; width: 360px; text-align: center; display: flex; flex-direction: column; gap: 16px;">
-            <div style="font-size: 40px; color: var(--accent);"><i data-lucide="user-plus" style="width: 48px; height: 48px;"></i></div>
-            <div id="friend-request-user" style="font-size: 18px; font-weight: 700; color: var(--text-header);">Friend Request</div>
-            <div style="color: var(--text-muted); font-size: 14px;">wants to be your friend</div>
-            <div style="display: flex; gap: 12px; justify-content: center;">
-                <button onclick="rejectPendingFriend()" style="padding: 10px 24px; border-radius: 8px; border: none; background: #f23f43; color: white; cursor: pointer; font-weight: 600;">
-                    <i data-lucide="x" style="width: 16px; height: 16px;"></i> Decline
-                </button>
-                <button onclick="acceptPendingFriend()" style="padding: 10px 24px; border-radius: 8px; border: none; background: var(--accent); color: white; cursor: pointer; font-weight: 600;">
-                    <i data-lucide="check" style="width: 16px; height: 16px;"></i> Accept
-                </button>
-            </div>
-        </div>
-    </div>
-
     <div id="context-menu" class="context-menu">
         <div id="cm-media-group">
             <div id="cm-copy" class="context-menu-item" onclick="copyMediaLink()">Copy Link</div>
@@ -324,13 +257,40 @@
     <div id="settings-modal" class="modal-container" onclick="if(event.target === this) toggleSettings()">
         <div class="modal-content">
             <div class="settings-header">
-                <h2>Settings</h2>
+                <h2 id="settings-page-title">Account</h2>
                 <button class="settings-close-btn" onclick="toggleSettings()"><i
                         data-lucide="x" style="width: 24px; height: 24px;"></i></button>
             </div>
+            <div class="settings-layout">
+                <nav class="settings-nav" aria-label="Settings sections">
+                    <div class="settings-nav-label">User Settings</div>
+                    <button class="settings-nav-item active" data-settings-page="account" onclick="selectSettingsPage('account')">
+                        <i data-lucide="user-round"></i><span>Account</span>
+                    </button>
+                    <button class="settings-nav-item" data-settings-page="voice" onclick="selectSettingsPage('voice')">
+                        <i data-lucide="mic-2"></i><span>Voice &amp; Video</span>
+                    </button>
+                    <button class="settings-nav-item" data-settings-page="notifications" onclick="selectSettingsPage('notifications')">
+                        <i data-lucide="bell"></i><span>Notifications</span>
+                    </button>
+                    <button class="settings-nav-item" data-settings-page="appearance" onclick="selectSettingsPage('appearance')">
+                        <i data-lucide="palette"></i><span>Appearance</span>
+                    </button>
+                    <div class="settings-nav-divider"></div>
+                    <div class="settings-nav-label">App Settings</div>
+                    <button class="settings-nav-item" data-settings-page="general" onclick="selectSettingsPage('general')">
+                        <i data-lucide="settings-2"></i><span>General</span>
+                    </button>
+                    <button class="settings-nav-item" data-settings-page="account-apps" onclick="selectSettingsPage('account-apps')">
+                        <i data-lucide="link-2"></i><span>Games &amp; Apps</span>
+                    </button>
+                    <button class="settings-nav-logout" onclick="window.electronAPI.logout()">
+                        <i data-lucide="log-out"></i><span>Log Out</span>
+                    </button>
+                </nav>
             <div class="settings-body">
                 <!-- Voice & Audio -->
-                <div class="settings-category">
+                <div class="settings-category" data-settings-page-content="voice">
                     <div class="settings-category-header">
                         <i data-lucide="mic-2"></i>
                         <span class="settings-category-title">Voice & Audio</span>
@@ -383,7 +343,7 @@
                     </div>
                 </div>
                 <!-- Notifications & Sounds -->
-                <div class="settings-category">
+                <div class="settings-category" data-settings-page-content="notifications">
                     <div class="settings-category-header">
                         <i data-lucide="bell"></i>
                         <span class="settings-category-title">Notifications & Sounds</span>
@@ -418,7 +378,7 @@
                     </div>
                 </div>
                 <!-- General -->
-                <div class="settings-category">
+                <div class="settings-category" data-settings-page-content="general">
                     <div class="settings-category-header">
                         <i data-lucide="settings-2"></i>
                         <span class="settings-category-title">General</span>
@@ -457,11 +417,52 @@
                     </div>
                 </div>
                 <!-- Account -->
-                <div class="settings-category">
+                <div class="settings-category" data-settings-page-content="account">
                     <div class="settings-category-header">
                         <i data-lucide="user"></i>
                         <span class="settings-category-title">Account</span>
                     </div>
+                    <div class="settings-card profile-settings-card">
+                        <div class="settings-card-row profile-settings-heading">
+                            <div class="settings-card-info">
+                                <div class="settings-card-label">Profile</div>
+                                <div class="settings-card-hint">Customize how you appear across bootcord.</div>
+                            </div>
+                            <div class="profile-settings-preview">
+                                <div id="edit-banner-preview" class="profile-settings-banner"></div>
+                                <img id="edit-avatar-preview" class="profile-settings-avatar" src="" alt="">
+                            </div>
+                        </div>
+                        <div class="settings-card-row col mb12">
+                            <label class="settings-field-label" for="edit-username-input">Username</label>
+                            <div class="settings-inline-field">
+                                <input type="text" id="edit-username-input" class="settings-text-input" placeholder="Username">
+                                <button onclick="saveUsername()" class="settings-btn-muted">Save</button>
+                            </div>
+                            <div class="settings-card-hint">You can change your username twice per hour.</div>
+                        </div>
+                        <div class="settings-card-row sep">
+                            <div class="settings-card-info">
+                                <div class="settings-card-label">Avatar</div>
+                                <div class="settings-card-hint">PNG, JPG or GIF.</div>
+                            </div>
+                            <button onclick="changeAvatar()" class="settings-btn-muted">Change Avatar</button>
+                        </div>
+                        <div class="settings-card-row sep">
+                            <div class="settings-card-info">
+                                <div class="settings-card-label">Banner</div>
+                                <div class="settings-card-hint">Add a banner to your profile.</div>
+                            </div>
+                            <button onclick="changeBanner()" class="settings-btn-muted">Change Banner</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-category" data-settings-page-content="appearance">
+                    <div class="settings-category-header"><i data-lucide="palette"></i><span class="settings-category-title">Appearance</span></div>
+                    <div class="settings-card"><div class="settings-card-row"><div class="settings-card-info"><div class="settings-card-label">Theme</div><div class="settings-card-hint">More themes will be available here.</div></div><span class="settings-page-placeholder">Dark</span></div></div>
+                </div>
+                <div class="settings-category" data-settings-page-content="account-apps">
+                    <div class="settings-category-header"><i data-lucide="link-2"></i><span class="settings-category-title">Games &amp; Apps</span></div>
                     <div class="settings-card">
                         <div class="settings-card-row col mb12">
                             <div class="settings-card-info">
@@ -473,13 +474,9 @@
                                 oninput="saveSetting('steamUrl', this.value)">
                         </div>
                     </div>
-                    <div class="settings-footer">
-                        <button class="settings-btn-danger" onclick="window.electronAPI.logout()">
-                            <i data-lucide="log-out" style="width: 18px; height: 18px;"></i>
-                            Log Out
-                        </button>
                     </div>
                 </div>
+            </div>
             </div>
         </div>
     </div>
@@ -487,6 +484,25 @@
     <div id="profile-modal" class="modal-container" onclick="closeProfile(event)"
         style="background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);">
         <div class="profile-popout" id="profile-popout" onclick="event.stopPropagation()"></div>
+    </div>
+    <div id="image-editor-modal" class="modal-container" onclick="if(event.target === this) closeImageEditor()">
+        <div class="image-editor-content" onclick="event.stopPropagation()">
+            <div class="settings-header">
+                <h2 id="image-editor-title">Adjust image</h2>
+                <button class="settings-close-btn" onclick="closeImageEditor()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="image-editor-preview-wrap">
+                <canvas id="image-editor-canvas" onpointerdown="startImageDrag(event)"></canvas>
+            </div>
+            <div class="image-editor-controls">
+                <label>Zoom <input id="image-editor-zoom" type="range" min="1" max="3" step="0.01" value="1"></label>
+                <div class="image-editor-hint">Drag the image to position it.</div>
+            </div>
+            <div class="image-editor-actions">
+                <button class="settings-btn-muted" onclick="closeImageEditor()">Cancel</button>
+                <button class="settings-btn-muted image-editor-save" onclick="saveEditedImage()">Apply</button>
+            </div>
+        </div>
     </div>
 
     <!-- Media Lightbox Modal -->
@@ -516,7 +532,7 @@
         function isGifLikeMedia(url) {
             if (!url || typeof url !== 'string') return false;
             const lowerUrl = url.toLowerCase();
-            return lowerUrl.endsWith('.gif') || lowerUrl.includes('tenor.com') || lowerUrl.includes('giphy.com');
+            return lowerUrl.endsWith('.gif') || lowerUrl.includes('tenor.com') || lowerUrl.includes('giphy.com') || lowerUrl.includes('klipy.com');
         }
 
         function makeVideoJsId(url) {
@@ -730,7 +746,6 @@
         const pickerPopover = document.getElementById('picker-popover');
         const mentionPicker = document.getElementById('mention-picker');
 
-        const FRIENDS_GUILD_ID = '1513156160352419920';
         let currentGuildId = null;
         let selectedChannelId = null;
         let mentionCounts = {}; // { guildId: count }
@@ -739,10 +754,6 @@
         let voiceGuildId = null;
         let isMuted = false;
         let isDeafened = false;
-        let friendsViewActive = false;
-        let friendsTab = 'all';
-        let pendingRequestUserId = null;
-        let incomingCallChannelId = null;
         let rightClickedMediaUrl = null;
         let rightClickedGifElement = null;
         let pickedFiles = [];
@@ -944,11 +955,191 @@
 
             if (!isVisible) {
                 loadSettingsUI();
+                selectSettingsPage('account');
                 modal.style.display = 'flex';
                 setTimeout(() => modal.classList.add('show'), 10);
             } else {
                 modal.classList.remove('show');
                 setTimeout(() => { if (!modal.classList.contains('show')) modal.style.display = ''; }, 250);
+            }
+        }
+
+        function selectSettingsPage(page) {
+            document.querySelectorAll('[data-settings-page]').forEach(item => {
+                item.classList.toggle('active', item.dataset.settingsPage === page);
+            });
+            document.querySelectorAll('[data-settings-page-content]').forEach(item => {
+                item.classList.toggle('active', item.dataset.settingsPageContent === page);
+            });
+            const titles = {
+                account: 'Account', voice: 'Voice & Video', notifications: 'Notifications',
+                appearance: 'Appearance', general: 'General', 'account-apps': 'Games & Apps'
+            };
+            document.getElementById('settings-page-title').textContent = titles[page] || 'Settings';
+            if (page === 'account') loadEditProfileData();
+        }
+
+        async function loadEditProfileData() {
+            const status = await window.electronAPI.getBotStatus();
+            if (status) {
+                document.getElementById('edit-username-input').value = (typeof status.tag === 'string' ? status.tag.split('#')[0] : '') || '';
+                if (status.avatar) {
+                    document.getElementById('edit-avatar-preview').src = status.avatar;
+                }
+                const bannerPreview = document.getElementById('edit-banner-preview');
+                bannerPreview.style.backgroundImage = status.banner ? `url("${status.banner}")` : '';
+                bannerPreview.classList.toggle('has-image', Boolean(status.banner));
+            }
+        }
+
+        async function saveUsername() {
+            const newUsername = document.getElementById('edit-username-input').value.trim();
+            if (!newUsername) {
+                showToast('Please enter a username', 'alert-circle');
+                return;
+            }
+            const result = await window.electronAPI.setUsername(newUsername);
+            if (result.success) {
+                showToast('Username changed successfully!', 'check-circle');
+                updateStatus();
+            } else {
+                showToast('Failed to change username: ' + (result.error || 'Unknown error'), 'alert-circle');
+            }
+        }
+
+        async function saveNickname() {
+            if (!currentGuildId) {
+                showToast('Please select a server first', 'alert-circle');
+                return;
+            }
+            const newNick = document.getElementById('edit-nickname-input').value.trim();
+            const result = await window.electronAPI.setNickname(currentGuildId, newNick);
+            if (result.success) {
+                showToast('Nickname changed successfully!', 'check-circle');
+            } else {
+                showToast('Failed to change nickname: ' + (result.error || 'Unknown error'), 'alert-circle');
+            }
+        }
+
+        let imageEditorState = null;
+
+        function syncImageEditorZoomProgress() {
+            const zoom = document.getElementById('image-editor-zoom');
+            const min = Number(zoom.min);
+            const max = Number(zoom.max);
+            const value = Number(zoom.value);
+            const ratio = (value - min) / (max - min);
+            // Track fill follows the thumb center, not the track's raw width.
+            zoom.style.setProperty('--zoom-progress', `calc(8px + ${(ratio * 100).toFixed(2)}% - ${ratio * 16}px)`);
+        }
+
+        function openImageEditor(filePath, type) {
+            const image = new Image();
+            image.onload = () => {
+                imageEditorState = { image, type, width: type === 'avatar' ? 512 : 1024, height: type === 'avatar' ? 512 : 512, x: 0, y: 0, dragging: false };
+                document.getElementById('image-editor-title').textContent = type === 'avatar' ? 'Adjust avatar' : 'Adjust banner';
+                document.getElementById('image-editor-zoom').value = '1';
+                syncImageEditorZoomProgress();
+                document.getElementById('image-editor-modal').style.display = 'flex';
+                setTimeout(() => document.getElementById('image-editor-modal').classList.add('show'), 10);
+                renderImageEditor();
+            };
+            image.src = `file:///${filePath.replace(/\\/g, '/')}`;
+        }
+
+        function renderImageEditor() {
+            if (!imageEditorState) return;
+            const canvas = document.getElementById('image-editor-canvas');
+            const { image, width, height } = imageEditorState;
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            const zoom = Number(document.getElementById('image-editor-zoom').value);
+            const x = imageEditorState.x;
+            const y = imageEditorState.y;
+            const scale = Math.max(width / image.width, height / image.height) * zoom;
+            const drawWidth = image.width * scale;
+            const drawHeight = image.height * scale;
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#1e1f22';
+            ctx.fillRect(0, 0, width, height);
+            ctx.drawImage(image, (width - drawWidth) / 2 + x * (drawWidth - width) / 2, (height - drawHeight) / 2 + y * (drawHeight - height) / 2, drawWidth, drawHeight);
+        }
+
+        function startImageDrag(event) {
+            if (!imageEditorState) return;
+            event.preventDefault();
+            imageEditorState.dragging = true;
+            imageEditorState.dragStartX = event.clientX;
+            imageEditorState.dragStartY = event.clientY;
+            imageEditorState.startX = imageEditorState.x;
+            imageEditorState.startY = imageEditorState.y;
+            event.currentTarget.setPointerCapture(event.pointerId);
+        }
+
+        document.addEventListener('pointermove', event => {
+            if (!imageEditorState?.dragging) return;
+            const canvas = document.getElementById('image-editor-canvas');
+            const rect = canvas.getBoundingClientRect();
+            const zoom = Number(document.getElementById('image-editor-zoom').value);
+            const scale = Math.max(imageEditorState.width / imageEditorState.image.width, imageEditorState.height / imageEditorState.image.height) * zoom;
+            const drawWidth = imageEditorState.image.width * scale;
+            const drawHeight = imageEditorState.image.height * scale;
+            const rangeX = Math.max(1, drawWidth - imageEditorState.width);
+            const rangeY = Math.max(1, drawHeight - imageEditorState.height);
+            imageEditorState.x = Math.max(-1, Math.min(1, imageEditorState.startX + (event.clientX - imageEditorState.dragStartX) * imageEditorState.width / rect.width * 2 / rangeX));
+            imageEditorState.y = Math.max(-1, Math.min(1, imageEditorState.startY + (event.clientY - imageEditorState.dragStartY) * imageEditorState.height / rect.height * 2 / rangeY));
+            renderImageEditor();
+        });
+
+        document.addEventListener('pointerup', () => {
+            if (imageEditorState) imageEditorState.dragging = false;
+        });
+
+        function closeImageEditor() {
+            const modal = document.getElementById('image-editor-modal');
+            modal.classList.remove('show');
+            setTimeout(() => { modal.style.display = ''; }, 250);
+            imageEditorState = null;
+        }
+
+        async function saveEditedImage() {
+            if (!imageEditorState) return;
+            const dataUrl = document.getElementById('image-editor-canvas').toDataURL('image/png');
+            const result = await window.electronAPI.saveProfileImage(dataUrl, 'png');
+            if (!result?.filePath) {
+                showToast(result?.error || 'Failed to prepare image', 'alert-circle');
+                return;
+            }
+            const { type } = imageEditorState;
+            closeImageEditor();
+            const upload = type === 'avatar' ? window.electronAPI.setAvatar(result.filePath) : window.electronAPI.setBanner(result.filePath);
+            const res = await upload;
+            if (res.success) {
+                showToast(`${type === 'avatar' ? 'Avatar' : 'Banner'} changed successfully!`, 'check-circle');
+                updateStatus();
+                loadEditProfileData();
+            } else {
+                showToast(`Failed to change ${type}: ${res.error || 'Unknown error'}`, 'alert-circle');
+            }
+        }
+
+        document.addEventListener('input', event => {
+            if (event.target.id === 'image-editor-zoom') syncImageEditorZoomProgress();
+            if (event.target.id?.startsWith('image-editor-')) renderImageEditor();
+        });
+
+        async function changeAvatar() {
+            const result = await window.electronAPI.selectImageFile();
+            if (result && result.filePath) {
+                openImageEditor(result.filePath, 'avatar');
+            }
+        }
+
+        async function changeBanner() {
+            const result = await window.electronAPI.selectImageFile();
+            if (result && result.filePath) {
+                openImageEditor(result.filePath, 'banner');
             }
         }
 
@@ -1116,7 +1307,7 @@
                 draw();
             } catch (e) {
                 console.error('Mic test failed:', e);
-                alert('Could not start mic test. Check permissions.');
+                showToast('Could not start mic test. Check permissions.', 'alert-circle');
             }
         }
 
@@ -1156,16 +1347,25 @@
 
         window.electronAPI.onUpdateDownloaded(() => {
             isUpdating = false;
-            if (confirm('Update downloaded. Restart to install?')) {
-                window.electronAPI.installUpdate();
-            }
+            document.getElementById('update-btn').title = 'Update downloaded';
+            window.electronAPI.installUpdate();
+        });
+
+        window.electronAPI.onUpdateError((message) => {
+            isUpdating = false;
+            showToast(`Update failed: ${message}`, 'alert-circle');
         });
 
         function startUpdate() {
             if (isUpdating) return;
             if (!updateVersion) return;
             isUpdating = true;
-            window.electronAPI.downloadUpdate();
+            window.electronAPI.downloadUpdate().then((success) => {
+                if (!success) {
+                    isUpdating = false;
+                    showToast('Update download failed. Try again later.', 'alert-circle');
+                }
+            });
         }
 
         setTimeout(() => window.electronAPI.checkForUpdates(), 5000);
@@ -1621,7 +1821,7 @@
 
             const urlRegex = /https?:\/\/[^\s]+/gi;
             const matches = content.match(urlRegex) || [];
-            const viewLinks = matches.filter(url => url.includes('tenor.com/view/') || url.includes('giphy.com/gifs/') || url.includes('giphy.com/media/'));
+            const viewLinks = matches.filter(url => url.includes('tenor.com/view/') || url.includes('giphy.com/gifs/') || url.includes('giphy.com/media/') || url.includes('klipy.com/gifs/'));
 
             if (msg.attachments) msg.attachments.forEach(url => { if (url) mediaMap.set(url, url); });
             if (msg.embeds) msg.embeds.forEach(e => {
@@ -1650,7 +1850,8 @@
                 const isMedia = lowerUrl.match(/\.(jpg|jpeg|gif|png|webp|mp4|mp3|wav|ogg|m4a|flac|aac)/i) ||
                     lowerUrl.includes('discordapp.net/attachments') ||
                     lowerUrl.includes('giphy.com/media') ||
-                    lowerUrl.includes('tenor.com');
+                    lowerUrl.includes('tenor.com') ||
+                    lowerUrl.includes('klipy.com/gifs');
                 if (isMedia) {
                     // If not already from an embed, add as direct media
                     if (!mediaMap.has(url)) mediaMap.set(url, url);
@@ -1667,7 +1868,8 @@
                     lowUrl.includes('discord.com/attachments') ||
                     lowUrl.includes('giphy.com/media') ||
                     lowUrl.includes('tenor.com/view/') ||
-                    lowUrl.includes('giphy.com/gifs/');
+                    lowUrl.includes('giphy.com/gifs/') ||
+                    lowUrl.includes('klipy.com/gifs/');
 
                 if (isDirectMedia && url) {
                     // Remove the WHOLE link from text. We use split/join for literal replacement of every instance.
@@ -1936,7 +2138,7 @@
         async function handleFileUpload() {
             const res = await window.electronAPI.selectFile();
             if (res && res.error) {
-                alert(res.error);
+                showToast(res.error, 'alert-circle');
                 return;
             }
             if (res && res.filePath) {
@@ -2376,49 +2578,162 @@
                 content.appendChild(grid);
 
             } else {
-                searchInput.style.display = 'none';
+                searchInput.style.display = 'block';
+                searchInput.placeholder = 'Search GIFs...';
                 const grid = document.createElement('div');
                 grid.className = 'gif-grid';
                 grid.style.padding = '12px';
 
-                if (savedGifs.length === 0) {
-                    grid.innerHTML = '<div class="empty-picker" style="padding: 40px; text-align: center; color: #949ba4;">Right-click a GIF in chat and "Save" to see it here!</div>';
+                if (!query) {
+                    // Show saved GIFs when no search query
+                    if (savedGifs.length === 0) {
+                        grid.innerHTML = '<div class="empty-picker" style="padding: 40px; text-align: center; color: #949ba4;">Search for GIFs or right-click a GIF in chat and "Save" to see it here!</div>';
+                    } else {
+                        const title = document.createElement('div');
+                        title.className = 'emoji-category-title';
+                        title.textContent = 'Saved GIFs';
+                        grid.appendChild(title);
+                        
+                        savedGifs.forEach(item => {
+                            const url = (typeof item === 'string') ? item : (item.media || item.view);
+                            const viewUrl = (typeof item === 'object') ? (item.view || item.media) : url;
+
+                            if (!url || typeof url !== 'string') return;
+                            const lowerUrl = url.split('?')[0].toLowerCase();
+                            const isVideo = lowerUrl.endsWith('.mp4') || lowerUrl.endsWith('.webm') || lowerUrl.endsWith('.mov') || url.includes('/videos/') || url.includes('tiny.mp4');
+                            let el;
+                            if (isVideo) {
+                                el = document.createElement('video');
+                                el.src = url;
+                                el.autoplay = true;
+                                el.loop = true;
+                                el.muted = true;
+                                el.style.backgroundColor = 'rgba(0,0,0,0.2)';
+                            } else {
+                                el = document.createElement('img');
+                                el.src = url;
+                            }
+
+                            el.className = 'picker-gif';
+                            el.onclick = () => {
+                                if (selectedChannelId) window.electronAPI.sendMessage(selectedChannelId, viewUrl);
+                                pickerPopover.style.display = 'none';
+                            };
+                            el.oncontextmenu = (e) => {
+                                e.preventDefault();
+                                handleGifRightClick(e, url);
+                            };
+                            grid.appendChild(el);
+                        });
+                    }
                 } else {
-                    savedGifs.forEach(item => {
-                        const url = (typeof item === 'string') ? item : (item.media || item.view);
-                        const viewUrl = (typeof item === 'object') ? (item.view || item.media) : url;
-
-                        if (!url || typeof url !== 'string') return;
-                        const lowerUrl = url.split('?')[0].toLowerCase();
-                        const isVideo = lowerUrl.endsWith('.mp4') || lowerUrl.endsWith('.webm') || lowerUrl.endsWith('.mov') || url.includes('/videos/') || url.includes('tiny.mp4');
-                        let el;
-                        if (isVideo) {
-                            el = document.createElement('video');
-                            el.src = url;
-                            el.autoplay = true;
-                            el.loop = true;
-                            el.muted = true;
-                            el.style.backgroundColor = 'rgba(0,0,0,0.2)';
+                    // Search GIFs from Tenor and Klipy
+                    grid.innerHTML = '<div style="padding: 20px; text-align: center; color: #949ba4;">Searching...</div>';
+                    searchGifs(query).then(results => {
+                        grid.innerHTML = '';
+                        if (results.length === 0) {
+                            grid.innerHTML = '<div style="padding: 40px; text-align: center; color: #949ba4;">No GIFs found</div>';
                         } else {
-                            el = document.createElement('img');
-                            el.src = url;
-                        }
+                            results.forEach(item => {
+                                const isVideo = item.media.toLowerCase().endsWith('.mp4') || item.media.toLowerCase().endsWith('.webm');
+                                let el;
+                                if (isVideo) {
+                                    el = document.createElement('video');
+                                    el.src = item.media;
+                                    el.autoplay = true;
+                                    el.loop = true;
+                                    el.muted = true;
+                                    el.style.backgroundColor = 'rgba(0,0,0,0.2)';
+                                } else {
+                                    el = document.createElement('img');
+                                    el.src = item.media;
+                                }
 
-                        el.className = 'picker-gif';
-                        el.onclick = () => {
-                            // Key fix: Send the VIEW URL to Discord so it expands as a GIF, not just a video link
-                            if (selectedChannelId) window.electronAPI.sendMessage(selectedChannelId, viewUrl);
-                            pickerPopover.style.display = 'none';
-                        };
-                        el.oncontextmenu = (e) => {
-                            e.preventDefault();
-                            handleGifRightClick(e, url);
-                        };
-                        grid.appendChild(el);
+                                el.className = 'picker-gif';
+                                el.title = `${item.provider}: ${item.title || 'GIF'}`;
+                                el.onclick = () => {
+                                    if (selectedChannelId) window.electronAPI.sendMessage(selectedChannelId, item.view);
+                                    pickerPopover.style.display = 'none';
+                                };
+                                el.oncontextmenu = (e) => {
+                                    e.preventDefault();
+                                    handleSearchGifRightClick(e, item);
+                                };
+                                grid.appendChild(el);
+                            });
+                        }
+                    }).catch(err => {
+                        console.error('[GIF Search] Error:', err);
+                        grid.innerHTML = '<div style="padding: 40px; text-align: center; color: #f23f42;">Search failed</div>';
                     });
                 }
                 content.appendChild(grid);
             }
+        }
+
+        async function searchGifs(query) {
+            const results = [];
+            const limit = 25; // Get 25 from each provider, mix them
+            
+            // Search Tenor and Klipy in parallel
+            const [tenorResults, klipyResults] = await Promise.allSettled([
+                searchTenor(query, limit),
+                searchKlipy(query, limit)
+            ]);
+
+            // Mix results from both providers
+            const tenor = tenorResults.status === 'fulfilled' ? tenorResults.value : [];
+            const klipy = klipyResults.status === 'fulfilled' ? klipyResults.value : [];
+            
+            // Interleave results: Tenor, Klipy, Tenor, Klipy...
+            const maxLen = Math.max(tenor.length, klipy.length);
+            for (let i = 0; i < maxLen; i++) {
+                if (i < tenor.length) results.push(tenor[i]);
+                if (i < klipy.length) results.push(klipy[i]);
+            }
+            
+            return results.slice(0, 50); // Cap at 50 total results
+        }
+
+        async function searchTenor(query, limit = 25) {
+            try {
+                const apiKey = 'AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCPk'; // Tenor public demo key
+                const url = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${apiKey}&limit=${limit}&media_filter=gif,tinygif`;
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Tenor API error: ${response.status}`);
+                
+                const data = await response.json();
+                return (data.results || []).map(item => ({
+                    provider: 'Tenor',
+                    title: item.content_description || '',
+                    media: item.media_formats?.tinygif?.url || item.media_formats?.gif?.url || '',
+                    view: item.url || item.itemurl || ''
+                })).filter(item => item.media && item.view);
+            } catch (err) {
+                console.error('[Tenor Search] Error:', err);
+                return [];
+            }
+        }
+
+        async function searchKlipy(query, limit = 25) {
+            // Klipy doesn't have a public search API yet
+            // For now, return empty - users can paste Klipy share URLs directly
+            // or save them from chat via right-click context menu
+            console.log('[Klipy] No public API available - use share URLs directly');
+            return [];
+        }
+
+        function handleSearchGifRightClick(e, gifItem) {
+            e.preventDefault();
+            rightClickedMediaUrl = gifItem.media;
+            rightClickedViewUrl = gifItem.view;
+            document.getElementById('cm-copy').style.display = 'block';
+            document.getElementById('cm-save').style.display = 'block';
+            document.getElementById('cm-remove-gif').style.display = 'none';
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = e.clientY + 'px';
         }
 
         function handleGifRightClick(e, url) {
@@ -2441,8 +2756,17 @@
             renderPickerContent();
         }
 
+        let gifSearchTimeout = null;
         document.getElementById('picker-search').oninput = (e) => {
-            renderPickerContent();
+            if (currentPickerTab === 'gif') {
+                // Debounce GIF search to avoid excessive API calls
+                clearTimeout(gifSearchTimeout);
+                gifSearchTimeout = setTimeout(() => {
+                    renderPickerContent();
+                }, 300);
+            } else {
+                renderPickerContent();
+            }
         };
 
         let skipVoiceSoundsOnce = false;
@@ -2856,7 +3180,6 @@
         };
 
         async function selectServer(id, name, auto = true) {
-            exitFriendsView();
             currentGuildId = id;
             selectedChannelId = null;
             shouldAutoSelectFirstChannel = auto;
@@ -2916,22 +3239,23 @@
 
         async function loadServers() {
             const allServers = await window.electronAPI.getServers();
-            const servers = allServers.filter(s => s.id !== FRIENDS_GUILD_ID);
+            const servers = allServers;
             // Don't clear innerHTML immediately to avoid flicker
             const tempContainer = document.createElement('div');
             servers.forEach(server => {
                 const mentionBadge = (mentionCounts[server.id] > 0) ? `<div class="mention-badge">${mentionCounts[server.id]}</div>` : '';
                 const isActive = (String(currentGuildId) === String(server.id));
 
+                const serverName = typeof server.name === 'string' ? server.name : 'Unknown server';
                 const iconContent = server.icon
                     ? `<img src="${server.icon}" style="width:100%; height:100%; border-radius:inherit; transition: border-radius 0.2s;">`
-                    : server.name.split(' ').map(w => w[0]).join('').substring(0, 3);
+                    : serverName.split(' ').map(w => w[0] || '').join('').substring(0, 3);
 
                 const el = document.createElement('div');
                 el.className = `server-icon ${isActive ? 'active' : ''}`;
                 el.style.position = 'relative';
-                el.title = server.name;
-                el.onclick = () => selectServer(server.id, server.name);
+                el.title = serverName;
+                el.onclick = () => selectServer(server.id, serverName);
                 el.innerHTML = `
                         ${iconContent}
                         ${mentionBadge}
@@ -2946,252 +3270,6 @@
                 serverList.appendChild(tempContainer.firstChild);
             }
         }
-
-        // ============ FRIENDS VIEW ============
-
-        function exitFriendsView() {
-            if (!friendsViewActive) return;
-            friendsViewActive = false;
-            const friendsView = document.getElementById('friends-view');
-            const channelSidebar = document.querySelector('.channel-sidebar');
-            const mainContent = document.querySelector('.main-content');
-            const memberSidebar = document.querySelector('.member-sidebar');
-            const friendsIcon = document.getElementById('friends-icon');
-            const friendsIndicator = document.getElementById('friends-indicator');
-            friendsView.style.display = 'none';
-            channelSidebar.style.display = '';
-            mainContent.style.display = '';
-            memberSidebar.style.display = '';
-            friendsIcon.classList.remove('active');
-            friendsIndicator.style.height = '0px';
-            friendsIndicator.style.opacity = '0';
-            updateIcons();
-        }
-
-        function toggleFriendsView() {
-            if (friendsViewActive) {
-                exitFriendsView();
-                return;
-            }
-            friendsViewActive = true;
-            const friendsView = document.getElementById('friends-view');
-            const channelSidebar = document.querySelector('.channel-sidebar');
-            const mainContent = document.querySelector('.main-content');
-            const memberSidebar = document.querySelector('.member-sidebar');
-            const friendsIcon = document.getElementById('friends-icon');
-            const friendsIndicator = document.getElementById('friends-indicator');
-            friendsView.style.display = 'flex';
-            channelSidebar.style.display = 'none';
-            mainContent.style.display = 'none';
-            memberSidebar.style.display = 'none';
-            friendsIcon.classList.add('active');
-            friendsIndicator.style.height = '40px';
-            friendsIndicator.style.opacity = '1';
-            renderFriendsList();
-            updateIcons();
-        }
-
-        let friendSearchTimer = null;
-
-        function onFriendSearchInput(query) {
-            clearTimeout(friendSearchTimer);
-            const resultsDiv = document.getElementById('friend-search-results');
-            if (query.trim().length < 2) {
-                resultsDiv.style.display = 'none';
-                return;
-            }
-            friendSearchTimer = setTimeout(async () => {
-                const users = await window.electronAPI.searchUsersByName(query.trim());
-                if (users.length === 0) {
-                    resultsDiv.innerHTML = '<div style="padding: 12px; color: var(--text-muted); text-align: center;">No users found</div>';
-                    resultsDiv.style.display = 'block';
-                    return;
-                }
-                resultsDiv.innerHTML = '';
-                const friends = await window.electronAPI.getFriendList();
-                const friendIds = new Set(friends.map(f => f.id));
-                users.forEach(u => {
-                    const el = document.createElement('div');
-                    el.dataset.userid = u.id;
-                    el.dataset.tag = u.tag;
-                    el.style.cssText = 'display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; border-radius: 6px; transition: background 0.15s;';
-                    el.onmouseenter = () => el.style.background = 'rgba(255,255,255,0.05)';
-                    el.onmouseleave = () => el.style.background = 'transparent';
-                    const alreadyFriend = friendIds.has(u.id);
-                    el.innerHTML = `
-                        <img src="${u.avatar}" style="width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;">
-                        <div style="flex: 1; min-width: 0;">
-                            <div style="font-weight: 600; color: var(--text-header); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${u.globalName}</div>
-                            <div style="font-size: 12px; color: var(--text-muted);">${u.tag}</div>
-                        </div>
-                        ${alreadyFriend
-                            ? '<span style="font-size: 12px; color: #23a55a;">✓ Friend</span>'
-                            : `<button onclick="event.stopPropagation(); doAddFriend('${u.id}')" style="padding: 6px 14px; border-radius: 6px; border: none; background: var(--accent); color: white; cursor: pointer; font-size: 12px; font-weight: 600;"><i data-lucide="user-plus" style="width: 14px; height: 14px;"></i> Add</button>`
-                        }
-                    `;
-                    resultsDiv.appendChild(el);
-                });
-                resultsDiv.style.display = 'block';
-                lucide.createIcons(resultsDiv);
-            }, 300);
-        }
-
-        async function doAddFriend(userId) {
-            const resultsDiv = document.getElementById('friend-search-results');
-            const userEl = resultsDiv?.querySelector(`[data-userid="${userId}"]`);
-            const tag = userEl?.dataset?.tag || userId;
-            await window.electronAPI.addFriendByTag(tag);
-            if (userEl) {
-                userEl.innerHTML = '<span style="font-size: 12px; color: #f0b232;">✉ Invite sent</span>';
-            }
-            showToast('Friend request sent to @' + tag, 'success');
-            document.getElementById('friend-add-input').value = '';
-            setTimeout(() => { if (resultsDiv) resultsDiv.style.display = 'none'; }, 1500);
-        }
-
-        // Close search results on click outside
-        document.addEventListener('click', (e) => {
-            const results = document.getElementById('friend-search-results');
-            const input = document.getElementById('friend-add-input');
-            if (results && input && !results.contains(e.target) && e.target !== input) {
-                results.style.display = 'none';
-            }
-        });
-
-        function switchFriendsTab(tab) {
-            friendsTab = tab;
-            document.querySelectorAll('[id^="friends-tab-"]').forEach(el => {
-                el.style.background = '';
-                el.style.color = '';
-            });
-            const activeTab = document.getElementById('friends-tab-' + tab);
-            if (activeTab) {
-                activeTab.style.background = 'var(--accent)';
-                activeTab.style.color = '#fff';
-            }
-            if (tab === 'all') renderFriendsList();
-            else renderPendingFriends();
-        }
-
-        async function renderFriendsList() {
-            const container = document.getElementById('friends-list-container');
-            container.innerHTML = '<div style="color: var(--text-muted); padding: 12px;">Loading...</div>';
-            const friends = await window.electronAPI.getFriendList();
-            container.innerHTML = '';
-            if (friends.length === 0) {
-                container.innerHTML = '<div style="color: var(--text-muted); padding: 24px; text-align: center;">No friends yet. Search for someone by name above!</div>';
-                return;
-            }
-            friends.forEach(f => {
-                const el = document.createElement('div');
-                el.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; transition: background 0.2s; cursor: pointer;';
-                el.onmouseover = () => el.style.background = 'rgba(255,255,255,0.04)';
-                el.onmouseout = () => el.style.background = 'transparent';
-                el.onclick = () => window.electronAPI.getUserProfile(f.id).then(p => { if (p) showProfile(p); });
-                const statusColor = f.status === 'online' ? '#23a55a' : f.status === 'idle' ? '#f0b232' : f.status === 'dnd' ? '#f23f43' : '#80848e';
-                el.innerHTML = `
-                    <div style="position: relative; width: 40px; height: 40px; flex-shrink: 0;">
-                        <img src="${f.avatar}" style="width: 40px; height: 40px; border-radius: 50%;">
-                        <div style="position: absolute; bottom: 0; right: 0; width: 14px; height: 14px; border-radius: 50%; background: ${statusColor}; border: 3px solid #313338;"></div>
-                    </div>
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="font-weight: 600; color: var(--text-header); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${f.globalName}</div>
-                        <div style="font-size: 12px; color: var(--text-muted);">@${f.tag}</div>
-                    </div>
-                    <button onclick="event.stopPropagation(); removeFriendUI('${f.id}')" style="background: none; border: none; color: #f23f43; cursor: pointer; padding: 4px; border-radius: 4px;" title="Remove Friend">
-                        <i data-lucide="user-minus" style="width: 16px; height: 16px;"></i>
-                    </button>
-                `;
-                container.appendChild(el);
-            });
-            updateIcons();
-        }
-
-        async function removeFriendUI(userId) {
-            await window.electronAPI.removeFriend(userId);
-            renderFriendsList();
-        }
-
-        async function removeFriendByTagUI(tag) {
-            await window.electronAPI.removeFriendByTag(tag);
-            renderFriendsList();
-        }
-
-        async function renderPendingFriends() {
-            const container = document.getElementById('friends-list-container');
-            container.innerHTML = '<div style="color: var(--text-muted); padding: 12px;">Loading...</div>';
-            const requests = await window.electronAPI.getPendingFriendRequests();
-            container.innerHTML = '';
-            if (requests.length === 0) {
-                container.innerHTML = '<div style="color: var(--text-muted); padding: 24px; text-align: center;">No pending friend requests.</div>';
-                return;
-            }
-            for (const req of requests) {
-                const user = await window.electronAPI.getUserProfile(req.userId).catch(() => null);
-                const el = document.createElement('div');
-                el.style.cssText = 'display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px;';
-                el.innerHTML = `
-                    <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                        <i data-lucide="user" style="width: 20px; height: 20px; color: var(--text-muted);"></i>
-                    </div>
-                    <div style="flex: 1; color: var(--text-header); font-weight: 600;">${user?.globalName || user?.username || req.userId}</div>
-                    <button onclick="acceptFriendReqUI('${req.userId}')" style="padding: 6px 16px; border-radius: 8px; border: none; background: var(--accent); color: white; cursor: pointer; font-size: 12px; font-weight: 600;">
-                        <i data-lucide="check" style="width: 14px; height: 14px;"></i> Accept
-                    </button>
-                    <button onclick="rejectFriendReqUI('${req.userId}')" style="padding: 6px 16px; border-radius: 8px; border: none; background: #f23f43; color: white; cursor: pointer; font-size: 12px; font-weight: 600;">
-                        <i data-lucide="x" style="width: 14px; height: 14px;"></i> Decline
-                    </button>
-                `;
-                container.appendChild(el);
-            }
-            updateIcons();
-        }
-
-        async function acceptFriendReqUI(userId) {
-            await window.electronAPI.acceptFriendRequest(userId);
-            renderPendingFriends();
-        }
-
-        async function rejectFriendReqUI(userId) {
-            await window.electronAPI.rejectFriendRequest(userId);
-            renderPendingFriends();
-        }
-
-        // ============ CALL HANDLING ============
-
-        function answerIncomingCall() {
-            if (!incomingCallChannelId) return;
-            window.electronAPI.answerCall(incomingCallChannelId);
-            document.getElementById('incoming-call-overlay').style.display = 'none';
-            incomingCallChannelId = null;
-        }
-
-        function rejectIncomingCall() {
-            if (incomingCallChannelId) {
-                window.electronAPI.endCall(incomingCallChannelId);
-            }
-            document.getElementById('incoming-call-overlay').style.display = 'none';
-            incomingCallChannelId = null;
-        }
-
-        function acceptPendingFriend() {
-            if (pendingRequestUserId) {
-                window.electronAPI.acceptFriendRequest(pendingRequestUserId);
-                pendingRequestUserId = null;
-            }
-            document.getElementById('friend-request-notification').classList.remove('show');
-            setTimeout(() => { document.getElementById('friend-request-notification').style.display = 'none'; }, 250);
-        }
-
-        function rejectPendingFriend() {
-            if (pendingRequestUserId) {
-                window.electronAPI.rejectFriendRequest(pendingRequestUserId);
-                pendingRequestUserId = null;
-            }
-            document.getElementById('friend-request-notification').classList.remove('show');
-            setTimeout(() => { document.getElementById('friend-request-notification').style.display = 'none'; }, 250);
-        }
-
 
         async function refreshChannels() {
             if (!currentGuildId) return;
@@ -3250,7 +3328,7 @@
                     if (String(currentVoiceChannelId) === String(c.id) && !isUserInList) {
                         members.push({
                             id: currentUserId,
-                            username: botTag ? botTag.split('#')[0] : 'You',
+                            username: typeof botTag === 'string' ? botTag.split('#')[0] : 'You',
                             avatar: botAvatar || 'https://cdn.discordapp.com/embed/avatars/0.png',
                             mute: isMuted, deaf: isDeafened, speaking: false
                         });
@@ -3365,7 +3443,7 @@
                     if (String(currentVoiceChannelId) === String(c.id) && !isUserInList) {
                         members.push({
                             id: currentUserId,
-                            username: botTag ? botTag.split('#')[0] : 'You',
+                            username: typeof botTag === 'string' ? botTag.split('#')[0] : 'You',
                             avatar: botAvatar || 'https://cdn.discordapp.com/embed/avatars/0.png',
                             mute: isMuted,
                             deaf: isDeafened,
@@ -3628,8 +3706,11 @@
                 </div>
             `).join('');
 
+            // Check if this is our own profile
+            const isOwnProfile = String(profile.id) === String(currentUserId);
+
             popout.innerHTML = `
-                <div class="profile-banner ${bannerUrl ? 'has-banner' : ''}" style="${bannerUrl ? `background-image: url(${bannerUrl})` : `background-color: ${bannerColor}`}"></div>
+                <div class="profile-banner ${bannerUrl ? 'has-banner' : ''}" style="${bannerUrl ? `background-image: url(${bannerUrl})` : `background-color: ${bannerColor}`}">${isOwnProfile ? '<div class="profile-banner-edit" onclick="selectNewBanner()" title="Change banner"><i data-lucide="pencil" style="width: 16px; height: 16px;"></i></div>' : ''}</div>
                 <div class="profile-avatar-container">
                     <div class="profile-avatar-wrapper">
                         <img src="${profile.avatar}" class="profile-avatar">
@@ -3647,6 +3728,7 @@
 
                         <div class="profile-section-title" style="margin-top: 16px;">Roles</div>
                         <div class="profile-roles">${rolesHtml || '<span style="color: #949ba4; font-size: 12px;">No roles</span>'}</div>
+                        
                     </div>
                 </div>
             `;
@@ -3657,6 +3739,56 @@
             const modal = document.getElementById('profile-modal');
             modal.classList.remove('show');
             setTimeout(() => { modal.style.display = 'none'; }, 250);
+        }
+
+        // Profile editing functions
+        async function showEditUsernameDialog() {
+            const status = await window.electronAPI.getBotStatus();
+            const currentUsername = typeof status?.tag === 'string' ? status.tag.split('#')[0] : '';
+            const newUsername = prompt('Enter new username:', currentUsername);
+            if (newUsername && newUsername !== currentUsername) {
+                const result = await window.electronAPI.setUsername(newUsername);
+                if (result.success) {
+                    showToast('Username changed successfully! You can change it twice per hour.', 'check-circle');
+                    closeProfile();
+                    updateStatus();
+                } else {
+                    showToast('Failed to change username: ' + (result.error || 'Unknown error'), 'alert-circle');
+                }
+            }
+        }
+
+        async function showEditNicknameDialog() {
+            if (!currentGuildId) {
+                showToast('Please select a server first to change your nickname.', 'alert-circle');
+                return;
+            }
+            const status = await window.electronAPI.getBotStatus();
+            const currentNick = status?.nickname || '';
+            const newNick = prompt('Enter new nickname for this server (leave empty to reset):', currentNick);
+            if (newNick !== null) {
+                const result = await window.electronAPI.setNickname(currentGuildId, newNick);
+                if (result.success) {
+                    showToast('Nickname changed successfully!', 'check-circle');
+                    closeProfile();
+                } else {
+                    showToast('Failed to change nickname: ' + (result.error || 'Unknown error'), 'alert-circle');
+                }
+            }
+        }
+
+        async function selectNewAvatar() {
+            const result = await window.electronAPI.selectImageFile();
+            if (result && result.filePath) {
+                openImageEditor(result.filePath, 'avatar');
+            }
+        }
+
+        async function selectNewBanner() {
+            const result = await window.electronAPI.selectImageFile();
+            if (result && result.filePath) {
+                openImageEditor(result.filePath, 'banner');
+            }
         }
 
         function openLightbox(url) {
@@ -3720,12 +3852,13 @@
         async function updateStatus() {
             const status = await window.electronAPI.getBotStatus();
             if (!status) return;
-            const botTag = status.tag || 'Bot#0000';
+            const botTag = typeof status.tag === 'string' ? status.tag : 'Bot#0000';
             document.getElementById('bot-tag').textContent = botTag.split('#')[0];
 
             // Find game activity
             const game = status.activities && status.activities.find(a => a.type === 0 || a.type === 4);
-            const statusText = game ? (game.type === 4 ? (game.state || game.name) : `Playing ${game.name}`) : (status.status.charAt(0).toUpperCase() + status.status.slice(1));
+            const currentStatus = typeof status.status === 'string' ? status.status : 'offline';
+            const statusText = game ? (game.type === 4 ? (game.state || game.name || '') : `Playing ${game.name || ''}`) : (currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1));
 
             document.getElementById('bot-status').textContent = statusText;
             document.getElementById('bot-status').style.color = game ? '#dbdee1' : 'var(--text-muted)';
@@ -3823,7 +3956,7 @@
                 const sources = await window.electronAPI.getScreenSources();
 
                 if (!sources || sources.length === 0) {
-                    alert('No screen sources available');
+                    showToast('No screen sources available', 'alert-circle');
                     return;
                 }
 
@@ -3845,7 +3978,7 @@
 
             } catch (error) {
                 console.error('Failed to start screen share:', error);
-                alert('Failed to start screen share: ' + error.message);
+                showToast('Failed to start screen share: ' + error.message, 'alert-circle');
                 await stopScreenShare();
             }
         }
@@ -3987,43 +4120,6 @@
         // Titlebar window state (maximized class)
         window.electronAPI.onWindowStateChanged((isMaximized) => {
             document.getElementById('titlebar')?.classList.toggle('titlebar-maximized', isMaximized);
-        });
-
-        // Friend & Call event listeners
-        window.electronAPI.onIncomingCall((data) => {
-            incomingCallChannelId = data.channelId;
-            document.getElementById('incoming-caller-name').textContent = 'Incoming Call from User';
-            const overlay = document.getElementById('incoming-call-overlay');
-            overlay.style.display = 'flex';
-            setTimeout(() => overlay.classList.add('show'), 10);
-            window.electronAPI.getUserProfile(data.callerId).then(p => {
-                if (p) document.getElementById('incoming-caller-name').textContent = p.globalName || p.username;
-            }).catch(() => {});
-        });
-
-        window.electronAPI.onCallStateChange((data) => {
-            if (data.type === 'call_ended') {
-                document.getElementById('incoming-call-overlay').classList.remove('show');
-                setTimeout(() => { document.getElementById('incoming-call-overlay').style.display = 'none'; }, 250);
-            }
-        });
-
-        window.electronAPI.onFriendListUpdate(() => {
-            const fv = document.getElementById('friends-view');
-            if (fv && fv.style.display !== 'none') {
-                renderFriendsList();
-            }
-        });
-
-        window.electronAPI.onPendingFriendRequest((data) => {
-            pendingRequestUserId = data.userId;
-            const modal = document.getElementById('friend-request-notification');
-            document.getElementById('friend-request-user').textContent = data.userId;
-            modal.style.display = 'flex';
-            setTimeout(() => modal.classList.add('show'), 10);
-            window.electronAPI.getUserProfile(data.userId).then(p => {
-                if (p) document.getElementById('friend-request-user').textContent = p.globalName || p.username;
-            }).catch(() => {});
         });
 
         async function submitLoginToken() {

@@ -1,12 +1,5 @@
 @echo off
-title bootcord starting...
-echo [bootcord] Compiling TypeScript...
+cd /d "%~dp0"
 call npm run build
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Build failed! Check your code.
-    pause
-    exit /b %ERRORLEVEL%
-)
-echo [bootcord] Starting Electron...
+if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 npx electron .
-pause

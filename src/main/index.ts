@@ -4,10 +4,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import * as bot from './bot.js';
-import * as screenShare from './screenShareServer.js';
-import { VelopackApp, UpdateManager } from 'velopack';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +13,40 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+type BotModule = typeof import('./bot.js');
+type ScreenShareModule = typeof import('./screenShareServer.js');
+let botModule: BotModule | null = null;
+let botLoadPromise: Promise<BotModule> | null = null;
+let screenShareModule: ScreenShareModule | null = null;
+let screenShareLoadPromise: Promise<ScreenShareModule> | null = null;
+
+function getBot(): Promise<BotModule> {
+    if (botModule) return Promise.resolve(botModule);
+    return botLoadPromise ??= import('./bot.js').then((module) => {
+        botModule = module;
+        return module;
+    });
+}
+
+function getScreenShare(): Promise<ScreenShareModule> {
+    if (screenShareModule) return Promise.resolve(screenShareModule);
+    return screenShareLoadPromise ??= import('./screenShareServer.js').then((module) => {
+        screenShareModule = module;
+        return module;
+    });
+}
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        if (!mainWindow) return;
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+    });
+}
 
 const configPath = path.join(app.getPath('userData'), 'config.json');
 
@@ -107,7 +139,7 @@ function createTray() {
         { type: 'separator' },
         { label: 'Exit', click: () => {
             isQuitting = true;
-            bot.leaveVoice('');
+            void botModule?.leaveVoice('');
             setTimeout(() => app.quit(), 200);
         }}
     ]);
@@ -117,27 +149,127 @@ function createTray() {
     tray.on('double-click', () => mainWindow?.show());
 }
 
-// Velopack — must run before any other app code
-VelopackApp.build().run();
+const GITHUB_OWNER = 'venderecultus';
+const GITHUB_REPO = 'bootcord';
+const GITHUB_BRANCH = 'main';
+const GITHUB_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`;
+const UPDATE_ROOT = path.resolve(__dirname, '../..');
+const UPDATE_EXCLUDES = new Set([
+    '.git', 'node_modules', 'graphify-out', 'release', 'coverage', '.env', 'dist',
+]);
 
-const UPDATE_URL = 'https://github.com/venderecultus/bootcord';
+type GitHubTreeEntry = { path: string; type: string; mode: string; sha: string; size?: number };
+let availableUpdate: { version: string; files: GitHubTreeEntry[]; stagePath?: string } | null = null;
+
+async function checkForGitHubUpdates(): Promise<boolean> {
+    try {
+        const remote = await getRemoteTree();
+        const changed = await getChangedFiles(remote.files);
+        availableUpdate = changed.length ? { version: remote.version, files: changed } : null;
+        if (availableUpdate) mainWindow?.webContents.send('update-available', remote.version);
+        else mainWindow?.webContents.send('update-not-available');
+        return Boolean(availableUpdate);
+    } catch (error) {
+        console.error('[Update] Check failed:', error);
+        mainWindow?.webContents.send('update-not-available');
+        return false;
+    }
+}
+
+function githubRequest(url: string, headers: Record<string, string> = {}): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        https.get(url, { headers: { 'User-Agent': 'bootcord-updater', ...headers } }, (response) => {
+            if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                response.resume();
+                githubRequest(response.headers.location, headers).then(resolve, reject);
+                return;
+            }
+            if (response.statusCode !== 200) {
+                response.resume();
+                reject(new Error(`GitHub returned HTTP ${response.statusCode}`));
+                return;
+            }
+            const chunks: Buffer[] = [];
+            response.on('data', (chunk: Buffer) => chunks.push(chunk));
+            response.on('end', () => resolve(Buffer.concat(chunks)));
+            response.on('error', reject);
+        }).on('error', reject);
+    });
+}
+
+function isUpdatePathAllowed(relativePath: string): boolean {
+    const normalized = path.posix.normalize(relativePath);
+    const parts = normalized.split('/');
+    return normalized === relativePath
+        && !parts.some((part) => UPDATE_EXCLUDES.has(part))
+        && !['start_bootcord.bat', 'start_bootcord.vbs'].includes(normalized)
+        && !normalized.startsWith('../')
+        && !path.posix.isAbsolute(normalized);
+}
+
+function resolveUpdatePath(root: string, relativePath: string): string {
+    if (!isUpdatePathAllowed(relativePath)) throw new Error(`Blocked update path: ${relativePath}`);
+    const resolved = path.resolve(root, ...relativePath.split('/'));
+    if (!resolved.startsWith(`${path.resolve(root)}${path.sep}`)) throw new Error(`Update path escapes application folder: ${relativePath}`);
+    return resolved;
+}
+
+function getLocalGitBlobSha(content: Buffer): string {
+    const header = Buffer.from(`blob ${content.length}\0`);
+    return crypto.createHash('sha1').update(Buffer.concat([header, content])).digest('hex');
+}
+
+async function getRemoteTree(): Promise<{ version: string; files: GitHubTreeEntry[] }> {
+    const branch = JSON.parse((await githubRequest(`${GITHUB_API}/branches/${GITHUB_BRANCH}`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
+    const commit = branch.commit.sha as string;
+    const tree = JSON.parse((await githubRequest(`${GITHUB_API}/git/trees/${commit}?recursive=1`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
+    if (tree.truncated) throw new Error('GitHub tree is too large to update safely');
+    const files = (tree.tree as GitHubTreeEntry[]).filter((entry) => entry.type === 'blob' && entry.mode !== '120000' && isUpdatePathAllowed(entry.path));
+    return { version: commit.slice(0, 7), files };
+}
+
+async function getChangedFiles(remoteFiles: GitHubTreeEntry[]): Promise<GitHubTreeEntry[]> {
+    const changed: GitHubTreeEntry[] = [];
+    for (const entry of remoteFiles) {
+        const localPath = resolveUpdatePath(UPDATE_ROOT, entry.path);
+        try {
+            const local = await fs.promises.readFile(localPath);
+            if (getLocalGitBlobSha(local) !== entry.sha) changed.push(entry);
+        } catch {
+            changed.push(entry);
+        }
+    }
+    return changed;
+}
+
+function startUpdateApplier(stagePath: string): void {
+    const updaterPath = path.join(os.tmpdir(), `bootcord-apply-update-${process.pid}.bat`);
+    const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const script = [
+        '@echo off',
+        'setlocal',
+        'timeout /t 2 /nobreak >nul',
+        `robocopy ${quote(stagePath)} ${quote(UPDATE_ROOT)} /E /MOVE /R:5 /W:1 /NFL /NDL /NJH /NJS /NP`,
+        'if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%',
+        `cd /d ${quote(UPDATE_ROOT)}`,
+        'call npm install --no-audit --no-fund',
+        'if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%',
+        'call npm run build',
+        'if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%',
+        `del ${quote(updaterPath)}`,
+        `start "" /d ${quote(UPDATE_ROOT)} cmd.exe /d /c npx electron .`,
+    ].join('\r\n');
+    fs.writeFileSync(updaterPath, script, 'utf8');
+    const child = spawn('cmd.exe', ['/d', '/c', updaterPath], { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+}
 
 app.whenReady().then(async () => {
+    if (!hasSingleInstanceLock) return;
     createWindow();
     createTray();
 
-    // Silent check at startup
-    try {
-        const um = new UpdateManager(UPDATE_URL);
-        const info = await um.checkForUpdatesAsync();
-        if (info) {
-            mainWindow?.webContents.send('update-available', String(info.TargetFullRelease?.Version || ''));
-        } else {
-            mainWindow?.webContents.send('update-not-available');
-        }
-    } catch {
-        mainWindow?.webContents.send('update-not-available');
-    }
+    void checkForGitHubUpdates();
 
     const showLogin = () => {
         console.log('[Main] Sending needs-login to renderer...');
@@ -150,6 +282,7 @@ app.whenReady().then(async () => {
     try {
         const savedToken = await getSavedToken();
         if (savedToken) {
+            const bot = await getBot();
             const loginPromise = bot.loginBot(savedToken);
             const timeoutPromise = new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error('Login timeout (15s)')), 15000)
@@ -167,36 +300,29 @@ app.whenReady().then(async () => {
 });
 
 function initBotHandlers() {
-    bot.onMessage((msg: any) => {
+    if (!botModule) return;
+    botModule.onMessage((msg: any) => {
         mainWindow?.webContents.send('discord-message', msg);
     });
-    bot.onVoiceStateUpdate((data: any) => {
+    botModule.onVoiceStateUpdate((data: any) => {
         mainWindow?.webContents.send('voice-state-update', data);
     });
-    bot.onPresenceUpdate((data: any) => {
+    botModule.onPresenceUpdate((data: any) => {
         mainWindow?.webContents.send('presence-update', data);
     });
-    bot.onAudioData((data) => {
+    botModule.onAudioData((data) => {
         mainWindow?.webContents.send('audio-from-discord', data);
-    });
-    bot.onIncomingCall((data) => {
-        mainWindow?.webContents.send('incoming-call', data);
-    });
-    bot.onCallStateChange((data) => {
-        mainWindow?.webContents.send('call-state-change', data);
-    });
-    bot.onPendingFriendRequest((data) => {
-        mainWindow?.webContents.send('pending-friend-request', data);
     });
 }
 
-ipcMain.handle('get-servers', () => bot.getServers());
-ipcMain.handle('get-channels', (_, guildId) => bot.getChannels(guildId));
-ipcMain.handle('create-invite', (_, channelId) => bot.createInvite(channelId));
-ipcMain.handle('get-pins', (_, channelId) => bot.getPins(channelId));
+ipcMain.handle('get-servers', async () => (await getBot()).getServers());
+ipcMain.handle('get-channels', async (_, guildId) => (await getBot()).getChannels(guildId));
+ipcMain.handle('create-invite', async (_, channelId) => (await getBot()).createInvite(channelId));
+ipcMain.handle('get-pins', async (_, channelId) => (await getBot()).getPins(channelId));
 
 ipcMain.handle('submit-token', async (_, token) => {
     try {
+        const bot = await getBot();
         const loginPromise = bot.loginBot(token);
         const timeout = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Login timeout (20s)')), 20000)
@@ -228,21 +354,21 @@ ipcMain.handle('change-token', () => {
     mainWindow?.webContents.send('needs-login');
 });
 
-ipcMain.handle('get-messages', (_, channelId, before) => bot.getMessageHistory(channelId, before));
-ipcMain.handle('get-members', (_, guildId) => bot.getGuildMembers(guildId));
-ipcMain.handle('send-message', (_, channelId, content, filePath, replyToId) => bot.sendMessage(channelId, content, filePath, replyToId));
-ipcMain.handle('delete-message', (_, channelId, messageId) => bot.deleteMessage(channelId, messageId));
-ipcMain.handle('edit-message', (_, channelId, messageId, content) => bot.editMessage(channelId, messageId, content));
-ipcMain.handle('get-guild-emojis', (_, guildId) => bot.getGuildEmojis(guildId));
+ipcMain.handle('get-messages', async (_, channelId, before) => (await getBot()).getMessageHistory(channelId, before));
+ipcMain.handle('get-members', async (_, guildId) => (await getBot()).getGuildMembers(guildId));
+ipcMain.handle('send-message', async (_, channelId, content, filePath, replyToId) => (await getBot()).sendMessage(channelId, content, filePath, replyToId));
+ipcMain.handle('delete-message', async (_, channelId, messageId) => (await getBot()).deleteMessage(channelId, messageId));
+ipcMain.handle('edit-message', async (_, channelId, messageId, content) => (await getBot()).editMessage(channelId, messageId, content));
+ipcMain.handle('get-guild-emojis', async (_, guildId) => (await getBot()).getGuildEmojis(guildId));
 
-ipcMain.handle('join-voice', (_, guildId, channelId) => bot.joinVoice(guildId, channelId));
-ipcMain.handle('leave-voice', (_, guildId) => bot.leaveVoice(guildId));
-ipcMain.handle('set-mute', (_, mute) => bot.setMute(mute));
-ipcMain.handle('set-deafen', (_, deaf) => bot.setDeafen(deaf));
-ipcMain.handle('update-mic-settings', (_, volume, deviceId) => bot.updateMicSettings(volume, deviceId));
-ipcMain.handle('set-noise-suppression', (_, enabled) => bot.setNoiseSuppression(enabled));
-ipcMain.handle('set-bot-status', (_, status) => bot.setNotificationStatus(status));
-ipcMain.on('audio-to-discord', (_, buffer) => bot.injectAudioChunk(buffer));
+ipcMain.handle('join-voice', async (_, guildId, channelId) => (await getBot()).joinVoice(guildId, channelId));
+ipcMain.handle('leave-voice', async (_, guildId) => (await getBot()).leaveVoice(guildId));
+ipcMain.handle('set-mute', async (_, mute) => (await getBot()).setMute(mute));
+ipcMain.handle('set-deafen', async (_, deaf) => (await getBot()).setDeafen(deaf));
+ipcMain.handle('update-mic-settings', async (_, volume, deviceId) => (await getBot()).updateMicSettings(volume, deviceId));
+ipcMain.handle('set-noise-suppression', async (_, enabled) => (await getBot()).setNoiseSuppression(enabled));
+ipcMain.handle('set-bot-status', async (_, status) => (await getBot()).setNotificationStatus(status));
+ipcMain.on('audio-to-discord', (_, buffer) => { void getBot().then((bot) => bot.injectAudioChunk(buffer)); });
 
 
 ipcMain.handle('select-file', async () => {
@@ -267,11 +393,38 @@ ipcMain.handle('select-file', async () => {
     }
 });
 
+ipcMain.handle('select-image-file', async () => {
+    const result = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [
+            { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }
+        ]
+    });
+    
+    const filePath = result.filePaths[0];
+    if (!filePath) return null;
+    
+    return { filePath };
+});
+
+ipcMain.handle('save-profile-image', async (_, dataUrl: string, extension = 'png') => {
+    try {
+        const match = /^data:image\/[^;]+;base64,(.+)$/.exec(dataUrl);
+        if (!match) return { error: 'Invalid image data.' };
+        const safeExtension = extension === 'jpg' ? 'jpg' : 'png';
+        const filePath = path.join(app.getPath('temp'), `bootcord-profile-${Date.now()}.${safeExtension}`);
+        await fs.promises.writeFile(filePath, Buffer.from(match[1], 'base64'));
+        return { filePath };
+    } catch {
+        return { error: 'Failed to prepare image.' };
+    }
+});
+
 ipcMain.handle('save-temp-and-send', async (_, channelId, content, arrayBuffer) => {
     try {
         const tempPath = path.join(os.tmpdir(), `upload_${Date.now()}.png`);
         await fs.promises.writeFile(tempPath, Buffer.from(arrayBuffer));
-        await bot.sendMessage(channelId, content, tempPath);
+        await (await getBot()).sendMessage(channelId, content, tempPath);
         return true;
     } catch (e) {
         console.error('[Main] Temp file upload failed:', e);
@@ -279,25 +432,24 @@ ipcMain.handle('save-temp-and-send', async (_, channelId, content, arrayBuffer) 
     }
 });
 
-ipcMain.handle('get-current-user-id', () => bot.getClient().user?.id || null);
+ipcMain.handle('get-current-user-id', async () => (await getBot()).getClient().user?.id || null);
 
-ipcMain.handle('get-bot-status', () => bot.getBotData());
+ipcMain.handle('get-bot-status', async () => (await getBot()).getBotData());
 ipcMain.handle('get-env-token', () => {
     return process.env.DISCORD_TOKEN || null;
 });
 
-ipcMain.on('update-steam-status', (event, url) => bot.setSteamUrl(url));
+ipcMain.on('update-steam-status', (event, url) => { void getBot().then((bot) => bot.setSteamUrl(url)); });
 ipcMain.handle('set-launch-on-startup', (_, enabled) => {
     app.setLoginItemSettings({ openAtLogin: enabled });
     return true;
 });
 ipcMain.handle('set-game-detection', (_, enabled) => {
-    if (enabled) bot.startPresenceScans();
-    else bot.stopPresenceScans();
+    void getBot().then((bot) => enabled ? bot.startPresenceScans() : bot.stopPresenceScans());
     return true;
 });
-ipcMain.handle('get-user-profile', (event, userId, guildId) => bot.getUserProfile(userId, guildId));
-ipcMain.handle('toggle-reaction', (e, channelId, messageId, emoji) => bot.toggleReaction(channelId, messageId, emoji));
+ipcMain.handle('get-user-profile', async (event, userId, guildId) => (await getBot()).getUserProfile(userId, guildId));
+ipcMain.handle('toggle-reaction', async (e, channelId, messageId, emoji) => (await getBot()).toggleReaction(channelId, messageId, emoji));
 
 // Screen Share handlers
 let screenShareMessageId: string | null = null;
@@ -324,6 +476,8 @@ ipcMain.handle('get-screen-sources', async () => {
 
 ipcMain.handle('start-screen-share', async (_, textChannelId, sourceId, sourceName) => {
     try {
+        const screenShare = await getScreenShare();
+        const bot = await getBot();
         const result = await screenShare.startScreenShareServer(sourceId, sourceName);
         const { port, publicUrl } = result;
         
@@ -365,12 +519,12 @@ ipcMain.handle('start-screen-share', async (_, textChannelId, sourceId, sourceNa
 
 ipcMain.handle('stop-screen-share', async () => {
     try {
-        await screenShare.stopScreenShareServer();
+        await (await getScreenShare()).stopScreenShareServer();
         activeRoomId = null;
         
         if (screenShareMessageId && screenShareChannelId) {
             try {
-                await bot.deleteMessage(screenShareChannelId, screenShareMessageId);
+                await (await getBot()).deleteMessage(screenShareChannelId, screenShareMessageId);
             } catch (error) {
                 console.error('[ScreenShare] Failed to delete Discord message:', error);
             }
@@ -385,49 +539,62 @@ ipcMain.handle('stop-screen-share', async () => {
     }
 });
 
-let velopackUpdateInfo: any = null;
-
-ipcMain.handle('check-for-updates', async () => {
-    try {
-        const um = new UpdateManager(UPDATE_URL);
-        const info = await um.checkForUpdatesAsync();
-        if (info) {
-            velopackUpdateInfo = info;
-            const ver = String(info.TargetFullRelease?.Version || '');
-            mainWindow?.webContents.send('update-available', ver);
-        } else {
-            mainWindow?.webContents.send('update-not-available');
-        }
-    } catch {
-        mainWindow?.webContents.send('update-not-available');
-    }
-    return true;
-});
+ipcMain.handle('check-for-updates', checkForGitHubUpdates);
 
 ipcMain.handle('download-update', async () => {
-    if (!velopackUpdateInfo) return false;
+    if (!availableUpdate) return false;
+    const update = availableUpdate;
+    const stagePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bootcord-update-'));
+    const totalBytes = update.files.reduce((sum, file) => sum + (file.size || 0), 0);
+    let downloadedBytes = 0;
+    let nextFileIndex = 0;
     try {
-        const um = new UpdateManager(UPDATE_URL);
-        await um.downloadUpdateAsync(velopackUpdateInfo, (pct: number) => {
-            mainWindow?.webContents.send('update-progress', pct);
-        });
+        const downloadWorker = async () => {
+            while (nextFileIndex < update.files.length) {
+                const file = update.files[nextFileIndex++];
+                const url = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${file.path.split('/').map(encodeURIComponent).join('/')}`;
+                const content = await githubRequest(url);
+                if (getLocalGitBlobSha(content) !== file.sha) throw new Error(`Downloaded file failed SHA check: ${file.path}`);
+                const destination = resolveUpdatePath(stagePath, file.path);
+                await fs.promises.mkdir(path.dirname(destination), { recursive: true });
+                await fs.promises.writeFile(destination, content);
+                downloadedBytes += content.length;
+                const percent = totalBytes ? Math.min(100, downloadedBytes / totalBytes * 100) : Math.min(100, nextFileIndex / update.files.length * 100);
+                mainWindow?.webContents.send('update-progress', percent);
+            }
+        };
+        const results = await Promise.allSettled(Array.from({ length: Math.min(5, update.files.length) }, downloadWorker));
+        const failedDownload = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failedDownload) throw failedDownload.reason;
+        availableUpdate = { ...update, stagePath };
         mainWindow?.webContents.send('update-downloaded');
         return true;
-    } catch (e) {
-        console.error('[Update] Download failed:', e);
+    } catch (error) {
+        await fs.promises.rm(stagePath, { recursive: true, force: true });
+        console.error('[Update] Download failed:', error);
+        mainWindow?.webContents.send('update-error', error instanceof Error ? error.message : String(error));
         return false;
     }
 });
 
 ipcMain.handle('install-update', async () => {
-    if (!velopackUpdateInfo) return;
-    try {
-        const um = new UpdateManager(UPDATE_URL);
-        await um.waitExitThenApplyUpdate(velopackUpdateInfo);
-        app.quit();
-    } catch (e) {
-        console.error('[Update] Install failed:', e);
-    }
+    if (!availableUpdate?.stagePath) return false;
+    const stagePath = availableUpdate.stagePath;
+    if (!mainWindow) return false;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        buttons: ['Close and update', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        message: 'Update downloaded',
+        detail: 'Close bootcord now to finish installing the update. The app will reopen when the update is applied.',
+    });
+    if (response !== 0) return false;
+
+    isQuitting = true;
+    app.once('will-quit', () => startUpdateApplier(stagePath));
+    app.quit();
+    return true;
 });
 
 ipcMain.on('window-minimize', () => mainWindow?.minimize());
@@ -501,26 +668,9 @@ ipcMain.on('show-system-notification', (_, title, body) => {
     }
 });
 
-// Friend management
-ipcMain.handle('add-friend-by-tag', (_, tag) => bot.addFriendByTag(tag));
-ipcMain.handle('search-users-by-name', (_, name) => bot.searchUsersByName(name));
-ipcMain.handle('remove-friend-by-tag', (_, tag) => { bot.removeFriendByTag(tag); return true; });
-ipcMain.handle('remove-friend', (_, userId) => bot.removeFriend(userId));
-ipcMain.handle('block-user', (_, userId) => bot.blockUser(userId));
-ipcMain.handle('get-friend-list', () => bot.getFriendListForUI());
-ipcMain.handle('refresh-friend-list-cache', () => bot.refreshFriendListCache());
-ipcMain.handle('is-friend', (_, userId) => bot.isFriend(userId));
-ipcMain.handle('accept-friend-request', (_, userId) => bot.acceptFriendRequest(userId));
-ipcMain.handle('reject-friend-request', (_, userId) => bot.rejectFriendRequest(userId));
-ipcMain.handle('get-pending-friend-requests', () => bot.getPendingFriendRequests());
 
-bot.onFriendListUpdate((data) => {
-    mainWindow?.webContents.send('friend-list-update', data);
-});
-
-// Call management
-ipcMain.handle('initiate-call', (_, userId) => bot.initiateCall(userId));
-ipcMain.handle('end-call', (_, channelId) => bot.endCall(channelId));
-ipcMain.handle('answer-call', (_, channelId) => bot.answerCall(channelId));
-ipcMain.handle('get-active-call', () => bot.getActiveCall());
-ipcMain.handle('join-call-voice', (_, channelId) => bot.joinCallViaVoice(channelId));
+// Profile editing
+ipcMain.handle('set-username', async (_, username) => (await getBot()).setUsername(username));
+ipcMain.handle('set-avatar', async (_, avatarPath) => (await getBot()).setAvatar(avatarPath));
+ipcMain.handle('set-banner', async (_, bannerPath) => (await getBot()).setBanner(bannerPath));
+ipcMain.handle('set-nickname', async (_, guildId, nickname) => (await getBot()).setNickname(guildId, nickname));

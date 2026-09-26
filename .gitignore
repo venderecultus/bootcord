@@ -1,12 +1,13 @@
 node_modules/
 .opencode/
 .env
-bootcord3.zip
-bootcord_demotest.zip
-bootcord7.zip
 README.md
 release
 Releases/
-friends.json
 .context/
 .github/
+.serena/
+graphify-out/
+node_modules/
+dist/
+*.tsbuildinfo

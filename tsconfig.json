@@ -13,9 +13,9 @@
     "jsx": "react-jsx",
     "isolatedModules": true,
     "moduleDetection": "force",
-    "sourceMap": true,
+    "sourceMap": false,
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": false
   },
   "exclude": ["src/renderer", "dist"]
 }
