@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import * as zlib from 'zlib';
 import { spawn } from 'child_process';
 import ffmpeg from 'ffmpeg-static';
 import { fileURLToPath } from 'url';
@@ -159,7 +160,7 @@ const UPDATE_EXCLUDES = new Set([
     '.git', 'node_modules', 'graphify-out', 'release', 'coverage', '.env', 'dist',
 ]);
 
-type GitHubTreeEntry = { path: string; type: string; mode: string; sha: string; size?: number };
+type GitHubTreeEntry = { path: string; type: string; mode: string; sha: string; size?: number; content?: Buffer };
 let availableUpdate: { version: string; commit: string; files: GitHubTreeEntry[]; stagePath?: string } | null = null;
 let availableRollback: { version: string; commit: string; files: GitHubTreeEntry[] } | null = null;
 
@@ -186,12 +187,14 @@ async function checkForRollback(): Promise<boolean> {
 
 async function checkForGitHubUpdates(): Promise<boolean> {
     try {
-        const remote = await getRemoteTree();
         const localCommit = (await fs.promises.readFile(BUILD_COMMIT_PATH, 'utf8')).trim();
-        availableUpdate = localCommit.toLowerCase() !== remote.commit.toLowerCase()
-            ? { version: remote.version, commit: remote.commit, files: remote.files }
+        const feed = (await githubRequest(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/commits/${GITHUB_BRANCH}.atom`)).toString('utf8');
+        const remoteCommit = feed.match(/<id>tag:github\.com,2008:Grit::Commit\/([a-f0-9]{40})<\/id>/i)?.[1];
+        if (!remoteCommit || !/^[a-f0-9]{40}$/i.test(remoteCommit)) throw new Error('GitHub returned an invalid build commit');
+        availableUpdate = localCommit.toLowerCase() !== remoteCommit.toLowerCase()
+            ? { version: remoteCommit.slice(0, 7), commit: remoteCommit, files: [] }
             : null;
-        if (availableUpdate) mainWindow?.webContents.send('update-available', remote.version);
+        if (availableUpdate) mainWindow?.webContents.send('update-available', availableUpdate.version);
         else mainWindow?.webContents.send('update-not-available');
         return Boolean(availableUpdate);
     } catch (error) {
@@ -245,12 +248,51 @@ function getLocalGitBlobSha(content: Buffer): string {
 }
 
 async function getRemoteTree(): Promise<{ version: string; commit: string; files: GitHubTreeEntry[] }> {
-    const branch = JSON.parse((await githubRequest(`${GITHUB_API}/branches/${GITHUB_BRANCH}`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
-    const commit = branch.commit.sha as string;
-    const tree = JSON.parse((await githubRequest(`${GITHUB_API}/git/trees/${commit}?recursive=1`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
-    if (tree.truncated) throw new Error('GitHub tree is too large to update safely');
-    const files = (tree.tree as GitHubTreeEntry[]).filter((entry) => entry.type === 'blob' && entry.mode !== '120000' && isUpdatePathAllowed(entry.path));
+    const commit = availableUpdate?.commit;
+    if (!commit) throw new Error('No update commit is available');
+    const archive = await githubRequest(`https://codeload.github.com/${GITHUB_OWNER}/${GITHUB_REPO}/zip/${commit}`);
+    const files = extractZipEntries(archive, commit);
     return { version: commit.slice(0, 7), commit, files };
+}
+
+function extractZipEntries(archive: Buffer, commit: string): GitHubTreeEntry[] {
+    const files: GitHubTreeEntry[] = [];
+    const prefix = `bootcord-${commit}/`;
+    let eocdOffset = archive.length - 22;
+    while (eocdOffset >= 0 && archive.readUInt32LE(eocdOffset) !== 0x06054b50) eocdOffset--;
+    if (eocdOffset < 0) throw new Error('Invalid update archive');
+    let offset = archive.readUInt32LE(eocdOffset + 16);
+    const entryCount = archive.readUInt16LE(eocdOffset + 10);
+    for (let index = 0; index < entryCount; index++) {
+        if (offset + 46 > archive.length || archive.readUInt32LE(offset) !== 0x02014b50) throw new Error('Invalid update archive');
+        const method = archive.readUInt16LE(offset + 10);
+        const compressedSize = archive.readUInt32LE(offset + 20);
+        const uncompressedSize = archive.readUInt32LE(offset + 24);
+        const nameLength = archive.readUInt16LE(offset + 28);
+        const extraLength = archive.readUInt16LE(offset + 30);
+        const commentLength = archive.readUInt16LE(offset + 32);
+        const localOffset = archive.readUInt32LE(offset + 42);
+        const name = archive.toString('utf8', offset + 46, offset + 46 + nameLength);
+        const nextOffset = offset + 46 + nameLength + extraLength + commentLength;
+        if (nextOffset > archive.length) throw new Error('Invalid update archive');
+        if (name.startsWith(prefix) && !name.endsWith('/')) {
+            const relativePath = name.slice(prefix.length);
+            if (isUpdatePathAllowed(relativePath)) {
+                const nameSize = archive.readUInt16LE(localOffset + 26);
+                const extraSize = archive.readUInt16LE(localOffset + 28);
+                const dataStart = localOffset + 30 + nameSize + extraSize;
+                const compressed = archive.subarray(dataStart, dataStart + compressedSize);
+                const content = method === 0 ? Buffer.from(compressed)
+                    : method === 8 ? zlib.inflateRawSync(compressed)
+                        : (() => { throw new Error(`Unsupported ZIP compression method: ${method}`); })();
+                if (content.length !== uncompressedSize) throw new Error(`Invalid update archive entry: ${relativePath}`);
+                files.push({ path: relativePath, type: 'blob', mode: '100644', sha: getLocalGitBlobSha(content), size: content.length, content });
+            }
+        }
+        offset = nextOffset;
+    }
+    if (!files.length) throw new Error('Update archive was empty or invalid');
+    return files;
 }
 
 function startUpdateApplier(stagePath: string): void {
@@ -594,8 +636,8 @@ async function downloadClientCommit(update: { version: string; commit: string; f
         const downloadWorker = async () => {
             while (nextFileIndex < update.files.length) {
                 const file = update.files[nextFileIndex++];
-                const url = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${file.path.split('/').map(encodeURIComponent).join('/')}`;
-                const content = await githubRequest(url);
+                const url = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${update.commit}/${file.path.split('/').map(encodeURIComponent).join('/')}`;
+                const content = file.content ?? await githubRequest(url);
                 if (getLocalGitBlobSha(content) !== file.sha) throw new Error(`Downloaded file failed SHA check: ${file.path}`);
                 const destination = resolveUpdatePath(stagePath, file.path);
                 await fs.promises.mkdir(path.dirname(destination), { recursive: true });
@@ -624,7 +666,13 @@ async function downloadClientCommit(update: { version: string; commit: string; f
 
 ipcMain.handle('download-update', async () => {
     if (!availableUpdate) return false;
-    return downloadClientCommit(availableUpdate);
+    try {
+        return await downloadClientCommit(await getRemoteTree());
+    } catch (error) {
+        console.error('[Update] Download preparation failed:', error);
+        mainWindow?.webContents.send('update-error', error instanceof Error ? error.message : String(error));
+        return false;
+    }
 });
 
 ipcMain.handle('download-rollback', async () => {
