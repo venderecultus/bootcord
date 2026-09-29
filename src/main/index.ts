@@ -196,7 +196,7 @@ async function checkForGitHubUpdates(): Promise<boolean> {
         return Boolean(availableUpdate);
     } catch (error) {
         console.error('[Update] Check failed:', error);
-        mainWindow?.webContents.send('update-not-available');
+        mainWindow?.webContents.send('update-error', error instanceof Error ? error.message : String(error));
         return false;
     }
 }
@@ -279,8 +279,6 @@ app.whenReady().then(async () => {
     if (!hasSingleInstanceLock) return;
     createWindow();
     createTray();
-
-    void checkForGitHubUpdates();
 
     const showLogin = () => {
         console.log('[Main] Sending needs-login to renderer...');
