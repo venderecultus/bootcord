@@ -20,7 +20,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import * as dotenv from 'dotenv';
-import { sendErrorNotification } from './index.js';
+import { sendErrorNotification } from './notifications.js';
 
 dotenv.config();
 
@@ -210,7 +210,7 @@ client.once('ready', () => {
 // Track active streams per user to avoid duplicates
 const userStreams = new Map<string, { receiver: any, decoder: any }>();
 
-function formatMessage(message: Message) {
+function formatReferencedMessage(message: Message) {
     let referencedMessage = null;
     if (message.reference && message.reference.messageId) {
         const refUser = message.mentions.repliedUser;
@@ -225,23 +225,44 @@ function formatMessage(message: Message) {
         };
     }
 
-    const systemContent = (() => {
-        switch (message.type) {
-            case MessageType.RecipientAdd: return `added <@${message.author.id}> to the join.`;
-            case MessageType.RecipientRemove: return `removed <@${message.author.id}> from the join.`;
-            case MessageType.ChannelNameChange: return `changed the channel name: **${message.content}**`;
-            case MessageType.ChannelIconChange: return `changed the channel icon.`;
-            case MessageType.ChannelPinnedMessage: return `pinned a message to this channel.`;
-            case MessageType.UserJoin: return `joined the server.`;
-            case MessageType.GuildBoost: return `boosted the server!`;
-            case MessageType.GuildBoostTier1: return `boosted the server (Tier 1)!`;
-            case MessageType.GuildBoostTier2: return `boosted the server (Tier 2)!`;
-            case MessageType.GuildBoostTier3: return `boosted the server (Tier 3)!`;
-            case MessageType.ThreadCreated: return `started a thread: **${message.content}**`;
-            case MessageType.AutoModerationAction: return `AutoModeration block.`;
-            default: return null;
-        }
-    })();
+    return referencedMessage;
+}
+
+function formatSystemContent(message: Message): string | null {
+    switch (message.type) {
+        case MessageType.RecipientAdd: return `added <@${message.author.id}> to the join.`;
+        case MessageType.RecipientRemove: return `removed <@${message.author.id}> from the join.`;
+        case MessageType.ChannelNameChange: return `changed the channel name: **${message.content}**`;
+        case MessageType.ChannelIconChange: return `changed the channel icon.`;
+        case MessageType.ChannelPinnedMessage: return `pinned a message to this channel.`;
+        case MessageType.UserJoin: return `joined the server.`;
+        case MessageType.GuildBoost: return `boosted the server!`;
+        case MessageType.GuildBoostTier1: return `boosted the server (Tier 1)!`;
+        case MessageType.GuildBoostTier2: return `boosted the server (Tier 2)!`;
+        case MessageType.GuildBoostTier3: return `boosted the server (Tier 3)!`;
+        case MessageType.ThreadCreated: return `started a thread: **${message.content}**`;
+        case MessageType.AutoModerationAction: return `AutoModeration block.`;
+        default: return null;
+    }
+}
+
+function formatMessageContent(message: Message): string {
+    let content = message.content || '';
+    content = content.replace(/<@!?(\d+)>/g, (match, id) => {
+        const user = message.guild?.members.cache.get(id)?.displayName || message.client.users.cache.get(id)?.username;
+        return user ? `[[@${user}]]` : match;
+    });
+    content = content.replace(/<#(\d+)>/g, (match, id) => {
+        const channel = message.guild?.channels.cache.get(id)?.name;
+        return channel ? `[[#${channel}]]` : match;
+    });
+    return content.replace(/<@&(\d+)>/g, (match, id) => {
+        const role = message.guild?.roles.cache.get(id)?.name;
+        return role ? `[[@${role}]]` : match;
+    });
+}
+
+function formatMessage(message: Message) {
 
     return {
         id: message.id,
@@ -253,26 +274,11 @@ function formatMessage(message: Message) {
         authorId: message.author.id,
         isSelf: message.author.id === client.user?.id,
         isMentioned: message.mentions.users.has(client.user?.id || '') || message.mentions.everyone,
-        content: (() => {
-            let c = message.content || '';
-            c = c.replace(/<@!?(\d+)>/g, (match, id) => {
-                const user = message.guild?.members.cache.get(id)?.displayName || message.client.users.cache.get(id)?.username;
-                return user ? `[[@${user}]]` : match;
-            });
-            c = c.replace(/<#(\d+)>/g, (match, id) => {
-                const channel = message.guild?.channels.cache.get(id)?.name;
-                return channel ? `[[#${channel}]]` : match;
-            });
-            c = c.replace(/<@&(\d+)>/g, (match, id) => {
-                const role = message.guild?.roles.cache.get(id)?.name;
-                return role ? `[[@${role}]]` : match;
-            });
-            return c;
-        })(),
+        content: formatMessageContent(message),
         avatar: message.author.displayAvatarURL(),
         timestamp: message.createdAt.toLocaleTimeString(),
         rawTimestamp: message.createdAt.toISOString(),
-        referencedMessage,
+        referencedMessage: formatReferencedMessage(message),
         attachments: message.attachments.map(a => a.url),
         reactions: Array.from(message.reactions.cache.values()).map(r => ({
             emoji: r.emoji.id ? `<${r.emoji.animated ? 'a' : ''}:${r.emoji.name}:${r.emoji.id}>` : r.emoji.name,
@@ -296,7 +302,7 @@ function formatMessage(message: Message) {
             video: e.video?.url || null,
             fields: e.fields?.map(f => ({ name: f.name, value: f.value, inline: f.inline || false })) || []
         })),
-        systemContent,
+        systemContent: formatSystemContent(message),
         type: message.type,
         poll: (message as any).poll ? {
             question: (message as any).poll.question.text,
@@ -850,43 +856,42 @@ export async function updateVoiceConnection() {
         connection.subscribe(audioPlayer);
     }
 
-    if (isChannelSwitch) {
-        // Listen to others - Only reset if we switched channels
-        connection.receiver.speaking.removeAllListeners('start');
-        
-        for (const userId of userStreams.keys()) {
-            cleanupUserStream(userId);
-        }
-
-        connection.receiver.speaking.on('start', (userId: string) => {
-            if (userStreams.has(userId)) return;
-            
-            console.log(`User ${userId} started speaking, setting up stream...`);
-            const receiverStream = connection.receiver.subscribe(userId, {
-                end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 }
-            });
-            
-            const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
-            
-            receiverStream.on('error', (err: Error) => {
-                console.log(`Receiver Stream Error (${userId}):`, err.message);
-                cleanupUserStream(userId);
-            });
-            decoder.on('error', (err: Error) => {
-                console.log(`Decoder Stream Error (${userId}):`, err.message);
-                cleanupUserStream(userId);
-            });
-            receiverStream.on('end', () => {
-                cleanupUserStream(userId);
-            });
-
-            userStreams.set(userId, { receiver: receiverStream, decoder });
-
-            receiverStream.pipe(decoder).on('data', (chunk: Buffer) => {
-                audioDataHandler({ userId, buffer: chunk });
-            });
-        });
+    // Rebind after every ready cycle: joinVoiceChannel may return a reused
+    // connection when the client rejoins the same channel.
+    connection.receiver.speaking.removeAllListeners('start');
+    for (const userId of userStreams.keys()) {
+        cleanupUserStream(userId);
     }
+
+    const activeConnection = connection;
+    activeConnection.receiver.speaking.on('start', (userId: string) => {
+        if (userStreams.has(userId)) return;
+
+        console.log(`User ${userId} started speaking, setting up stream...`);
+        const receiverStream = activeConnection.receiver.subscribe(userId, {
+            end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 }
+        });
+
+        const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+
+        receiverStream.on('error', (err: Error) => {
+            console.log(`Receiver Stream Error (${userId}):`, err.message);
+            cleanupUserStream(userId);
+        });
+        decoder.on('error', (err: Error) => {
+            console.log(`Decoder Stream Error (${userId}):`, err.message);
+            cleanupUserStream(userId);
+        });
+        receiverStream.on('end', () => {
+            cleanupUserStream(userId);
+        });
+
+        userStreams.set(userId, { receiver: receiverStream, decoder });
+
+        receiverStream.pipe(decoder).on('data', (chunk: Buffer) => {
+            audioDataHandler({ userId, buffer: chunk });
+        });
+    });
 
     // Always check mic process (it handles selfMute internally)
     startPythonMic();
@@ -1177,6 +1182,7 @@ export function leaveVoice(guildId: string) {
             } catch (e) {
                 console.error('[Bot] Error destroying connection:', e);
             }
+            lastActiveChannelId = null;
             currentVoiceState.guildId = null;
             currentVoiceState.channelId = null;
             return { status: 'Disconnected' };
@@ -1193,6 +1199,7 @@ export function leaveVoice(guildId: string) {
             } catch (e) {
                 console.error('[Bot] Error destroying connection:', e);
             }
+            lastActiveChannelId = null;
             currentVoiceState.guildId = null;
             currentVoiceState.channelId = null;
             stopPythonMic();
@@ -1458,4 +1465,3 @@ export async function sendScreenShareLinkToChannel(textChannelId: string, url: s
         return null;
     }
 }
-

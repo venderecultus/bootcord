@@ -284,6 +284,9 @@
                     <button class="settings-nav-item" data-settings-page="account-apps" onclick="selectSettingsPage('account-apps')">
                         <i data-lucide="link-2"></i><span>Games &amp; Apps</span>
                     </button>
+                    <button class="settings-nav-item" data-settings-page="changelog" onclick="selectSettingsPage('changelog')">
+                        <i data-lucide="scroll-text"></i><span>Changelog</span>
+                    </button>
                     <button class="settings-nav-logout" onclick="window.electronAPI.logout()">
                         <i data-lucide="log-out"></i><span>Log Out</span>
                     </button>
@@ -415,6 +418,15 @@
                             </label>
                         </div>
                     </div>
+                    <div class="settings-card">
+                        <div class="settings-card-row">
+                            <div class="settings-card-info">
+                                <div class="settings-card-label">Client Update</div>
+                                <div class="settings-card-hint">Return to the previous client version.</div>
+                            </div>
+                            <button class="settings-btn-muted" id="rollback-btn" onclick="startRollback()">Roll Back</button>
+                        </div>
+                    </div>
                 </div>
                 <!-- Account -->
                 <div class="settings-category" data-settings-page-content="account">
@@ -474,6 +486,17 @@
                                 oninput="saveSetting('steamUrl', this.value)">
                         </div>
                     </div>
+                    </div>
+                </div>
+                <div class="settings-category" data-settings-page-content="changelog">
+                    <div class="settings-category-header">
+                        <i data-lucide="scroll-text"></i>
+                        <span class="settings-category-title">Changelog</span>
+                    </div>
+                    <div class="changelog-content">
+                        <p>Fixed an issue that could prevent incoming voice audio after reconnecting to a channel.</p>
+                        <p>Added an option to roll back to the previous client version.</p>
+                        <p>Animated GIF avatars and banners can now be repositioned and cropped.</p>
                     </div>
                 </div>
             </div>
@@ -973,7 +996,7 @@
             });
             const titles = {
                 account: 'Account', voice: 'Voice & Video', notifications: 'Notifications',
-                appearance: 'Appearance', general: 'General', 'account-apps': 'Games & Apps'
+                appearance: 'Appearance', general: 'General', 'account-apps': 'Games & Apps', changelog: 'Changelog'
             };
             document.getElementById('settings-page-title').textContent = titles[page] || 'Settings';
             if (page === 'account') loadEditProfileData();
@@ -1033,10 +1056,10 @@
             zoom.style.setProperty('--zoom-progress', `calc(8px + ${(ratio * 100).toFixed(2)}% - ${ratio * 16}px)`);
         }
 
-        function openImageEditor(filePath, type) {
+        function openImageEditor(filePath, type, isGif = false) {
             const image = new Image();
             image.onload = () => {
-                imageEditorState = { image, type, width: type === 'avatar' ? 512 : 1024, height: type === 'avatar' ? 512 : 512, x: 0, y: 0, dragging: false };
+                imageEditorState = { image, type, filePath, isGif, width: type === 'avatar' ? 512 : 1024, height: 512, x: 0, y: 0, dragging: false };
                 document.getElementById('image-editor-title').textContent = type === 'avatar' ? 'Adjust avatar' : 'Adjust banner';
                 document.getElementById('image-editor-zoom').value = '1';
                 syncImageEditorZoomProgress();
@@ -1060,6 +1083,32 @@
             const scale = Math.max(width / image.width, height / image.height) * zoom;
             const drawWidth = image.width * scale;
             const drawHeight = image.height * scale;
+            if (imageEditorState.isGif) {
+                canvas.style.visibility = 'hidden';
+                let preview = document.getElementById('image-editor-gif-preview');
+                if (!preview) {
+                    preview = document.createElement('img');
+                    preview.id = 'image-editor-gif-preview';
+                    preview.style.cssText = 'position:absolute;pointer-events:none;';
+                    canvas.parentElement.style.position = 'relative';
+                    canvas.parentElement.appendChild(preview);
+                }
+                preview.src = image.src;
+                preview.style.visibility = 'visible';
+                const fitScale = Math.max(width / image.width, height / image.height) * zoom;
+                const previewWidth = image.width * fitScale * canvas.clientWidth / width;
+                const previewHeight = image.height * fitScale * canvas.clientHeight / height;
+                const left = (width - image.width * fitScale) / 2 + x * (image.width * fitScale - width) / 2;
+                const top = (height - image.height * fitScale) / 2 + y * (image.height * fitScale - height) / 2;
+                preview.style.left = `${canvas.offsetLeft + left * canvas.clientWidth / width}px`;
+                preview.style.top = `${canvas.offsetTop + top * canvas.clientHeight / height}px`;
+                preview.style.width = `${previewWidth}px`;
+                preview.style.height = `${previewHeight}px`;
+                preview.style.clipPath = `inset(${Math.max(0, -top * canvas.clientHeight / height)}px ${Math.max(0, (left + image.width * fitScale - width) * canvas.clientWidth / width)}px ${Math.max(0, (top + image.height * fitScale - height) * canvas.clientHeight / height)}px ${Math.max(0, -left * canvas.clientWidth / width)}px)`;
+                return;
+            }
+            canvas.style.visibility = 'visible';
+            document.getElementById('image-editor-gif-preview')?.remove();
             ctx.clearRect(0, 0, width, height);
             ctx.fillStyle = '#1e1f22';
             ctx.fillRect(0, 0, width, height);
@@ -1100,18 +1149,22 @@
             const modal = document.getElementById('image-editor-modal');
             modal.classList.remove('show');
             setTimeout(() => { modal.style.display = ''; }, 250);
+            const canvas = document.getElementById('image-editor-canvas');
+            canvas.style.visibility = 'visible';
+            document.getElementById('image-editor-gif-preview')?.remove();
             imageEditorState = null;
         }
 
         async function saveEditedImage() {
             if (!imageEditorState) return;
-            const dataUrl = document.getElementById('image-editor-canvas').toDataURL('image/png');
-            const result = await window.electronAPI.saveProfileImage(dataUrl, 'png');
+            const { type, isGif, filePath, width, height, x, y } = imageEditorState;
+            const result = isGif
+                ? await window.electronAPI.editProfileGif(filePath, width, height, Number(document.getElementById('image-editor-zoom').value), x, y)
+                : await window.electronAPI.saveProfileImage(document.getElementById('image-editor-canvas').toDataURL('image/png'), 'png');
             if (!result?.filePath) {
                 showToast(result?.error || 'Failed to prepare image', 'alert-circle');
                 return;
             }
-            const { type } = imageEditorState;
             closeImageEditor();
             const upload = type === 'avatar' ? window.electronAPI.setAvatar(result.filePath) : window.electronAPI.setBanner(result.filePath);
             const res = await upload;
@@ -1132,14 +1185,14 @@
         async function changeAvatar() {
             const result = await window.electronAPI.selectImageFile();
             if (result && result.filePath) {
-                openImageEditor(result.filePath, 'avatar');
+                openImageEditor(result.filePath, 'avatar', result.filePath.toLowerCase().endsWith('.gif'));
             }
         }
 
         async function changeBanner() {
             const result = await window.electronAPI.selectImageFile();
             if (result && result.filePath) {
-                openImageEditor(result.filePath, 'banner');
+                openImageEditor(result.filePath, 'banner', result.filePath.toLowerCase().endsWith('.gif'));
             }
         }
 
@@ -1368,7 +1421,25 @@
             });
         }
 
+        async function startRollback() {
+            if (isUpdating) return;
+            const button = document.getElementById('rollback-btn');
+            button.disabled = true;
+            isUpdating = true;
+            const success = await window.electronAPI.downloadRollback();
+            if (!success) {
+                isUpdating = false;
+                button.disabled = false;
+                showToast('Could not download the previous client version.', 'alert-circle');
+            }
+        }
+
         setTimeout(() => window.electronAPI.checkForUpdates(), 5000);
+        window.electronAPI.checkForRollback().then((available) => {
+            const button = document.getElementById('rollback-btn');
+            button.disabled = !available;
+            button.title = available ? 'Download the previous client version' : 'No previous client version available';
+        });
 
         function saveSetting(key, val) {
             appSettings[key] = val;

@@ -11,3 +11,4 @@ graphify-out/
 node_modules/
 dist/
 *.tsbuildinfo
+.sentrux

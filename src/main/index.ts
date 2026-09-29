@@ -5,7 +5,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
+import ffmpeg from 'ffmpeg-static';
 import { fileURLToPath } from 'url';
+import { setErrorNotificationHandler } from './notifications.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,11 +53,9 @@ if (!hasSingleInstanceLock) {
 const configPath = path.join(app.getPath('userData'), 'config.json');
 
 // Error notification system
-export function sendErrorNotification(message: string, details: string, type: 'microphone' | 'network' | 'voice' | 'general' = 'general') {
-    if (mainWindow) {
-        mainWindow.webContents.send('app-error', { message, details, type });
-    }
-}
+setErrorNotificationHandler((message, details, type) => {
+    mainWindow?.webContents.send('app-error', { message, details, type });
+});
 
 async function getSavedToken() {
     try {
@@ -161,6 +161,28 @@ const UPDATE_EXCLUDES = new Set([
 
 type GitHubTreeEntry = { path: string; type: string; mode: string; sha: string; size?: number };
 let availableUpdate: { version: string; commit: string; files: GitHubTreeEntry[]; stagePath?: string } | null = null;
+let availableRollback: { version: string; commit: string; files: GitHubTreeEntry[] } | null = null;
+
+async function checkForRollback(): Promise<boolean> {
+    try {
+        const localCommit = (await fs.promises.readFile(BUILD_COMMIT_PATH, 'utf8')).trim();
+        const commitData = JSON.parse((await githubRequest(`${GITHUB_API}/commits/${encodeURIComponent(localCommit)}`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
+        const previousCommit = commitData.parents?.[0]?.sha as string | undefined;
+        if (!previousCommit) {
+            availableRollback = null;
+            return false;
+        }
+        const tree = JSON.parse((await githubRequest(`${GITHUB_API}/git/trees/${previousCommit}?recursive=1`, { Accept: 'application/vnd.github+json' })).toString('utf8'));
+        if (tree.truncated) throw new Error('GitHub tree is too large to roll back safely');
+        const files = (tree.tree as GitHubTreeEntry[]).filter((entry) => entry.type === 'blob' && entry.mode !== '120000' && isUpdatePathAllowed(entry.path));
+        availableRollback = { version: previousCommit.slice(0, 7), commit: previousCommit, files };
+        return true;
+    } catch (error) {
+        console.error('[Rollback] Check failed:', error);
+        availableRollback = null;
+        return false;
+    }
+}
 
 async function checkForGitHubUpdates(): Promise<boolean> {
     try {
@@ -409,6 +431,39 @@ ipcMain.handle('save-profile-image', async (_, dataUrl: string, extension = 'png
     }
 });
 
+ipcMain.handle('edit-profile-gif', async (_, sourcePath: string, width: number, height: number, zoom: number, x: number, y: number) => {
+    let ffmpegBinary = ffmpeg as unknown as string | null;
+    if (app.isPackaged && ffmpegBinary?.includes('app.asar')) ffmpegBinary = ffmpegBinary.replace('app.asar', 'app.asar.unpacked');
+    if (!ffmpegBinary) return { error: 'GIF editor is unavailable.' };
+    if (![width, height, zoom, x, y].every(Number.isFinite) || width < 1 || height < 1 || zoom < 1 || zoom > 4) {
+        return { error: 'Invalid image editor settings.' };
+    }
+    if (typeof sourcePath !== 'string' || path.extname(sourcePath).toLowerCase() !== '.gif') {
+        return { error: 'Select a GIF image.' };
+    }
+
+    const outputPath = path.join(app.getPath('temp'), `bootcord-profile-${Date.now()}.gif`);
+    const offsetX = Math.max(-1, Math.min(1, x));
+    const offsetY = Math.max(-1, Math.min(1, y));
+    const filter = `scale=w='iw*max(${width}/iw\\,${height}/ih)*${zoom}':h='ih*max(${width}/iw\\,${height}/ih)*${zoom}':flags=lanczos,crop=${width}:${height}:x='(iw-${width})*(${offsetX}+1)/2':y='(ih-${height})*(${offsetY}+1)/2',split[a][b];[a]palettegen=reserve_transparent=1[p];[b][p]paletteuse`;
+
+    try {
+        const stat = await fs.promises.stat(sourcePath);
+        if (!stat.isFile() || stat.size > 10 * 1024 * 1024) return { error: 'GIF must be a file smaller than 10MB.' };
+        await new Promise<void>((resolve, reject) => {
+            const child = spawn(ffmpegBinary, ['-y', '-i', sourcePath, '-filter_complex', filter, '-loop', '0', outputPath], { windowsHide: true });
+            let stderr = '';
+            child.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+            child.on('error', reject);
+            child.on('close', code => code === 0 ? resolve() : reject(new Error(stderr.slice(-1000) || `FFmpeg exited with code ${code}`)));
+        });
+        return { filePath: outputPath };
+    } catch (error) {
+        console.error('[Main] Failed to edit profile GIF:', error);
+        return { error: 'Failed to process GIF.' };
+    }
+});
+
 ipcMain.handle('save-temp-and-send', async (_, channelId, content, arrayBuffer) => {
     try {
         const tempPath = path.join(os.tmpdir(), `upload_${Date.now()}.png`);
@@ -529,11 +584,11 @@ ipcMain.handle('stop-screen-share', async () => {
 });
 
 ipcMain.handle('check-for-updates', checkForGitHubUpdates);
+ipcMain.handle('check-for-rollback', checkForRollback);
 
-ipcMain.handle('download-update', async () => {
-    if (!availableUpdate) return false;
-    const update = availableUpdate;
+async function downloadClientCommit(update: { version: string; commit: string; files: GitHubTreeEntry[] }): Promise<boolean> {
     const stagePath = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bootcord-update-'));
+    const previousUpdate = availableUpdate;
     const totalBytes = update.files.reduce((sum, file) => sum + (file.size || 0), 0);
     let downloadedBytes = 0;
     let nextFileIndex = 0;
@@ -562,10 +617,21 @@ ipcMain.handle('download-update', async () => {
         return true;
     } catch (error) {
         await fs.promises.rm(stagePath, { recursive: true, force: true });
+        availableUpdate = previousUpdate;
         console.error('[Update] Download failed:', error);
         mainWindow?.webContents.send('update-error', error instanceof Error ? error.message : String(error));
         return false;
     }
+}
+
+ipcMain.handle('download-update', async () => {
+    if (!availableUpdate) return false;
+    return downloadClientCommit(availableUpdate);
+});
+
+ipcMain.handle('download-rollback', async () => {
+    if (!await checkForRollback() || !availableRollback) return false;
+    return downloadClientCommit(availableRollback);
 });
 
 ipcMain.handle('install-update', async () => {

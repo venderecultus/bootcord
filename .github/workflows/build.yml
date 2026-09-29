@@ -11,8 +11,21 @@ env:
   DOTNET_ROOT: ${{ env.DOTNET_ROOT }}
 
 jobs:
+  sentrux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Sentrux
+        shell: bash
+        run: |
+          curl -L -o sentrux https://github.com/sentrux/sentrux/releases/latest/download/sentrux-linux-x86_64
+          chmod +x sentrux
+          sudo install sentrux /usr/local/bin/sentrux
+      - run: sentrux check .
+
   build:
     runs-on: windows-latest
+    needs: sentrux
     permissions:
       contents: write
     steps:

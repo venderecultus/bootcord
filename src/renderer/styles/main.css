@@ -2477,6 +2477,15 @@ i[data-lucide] {
 
 .settings-category[data-settings-page-content].active {
     display: flex;
+    min-width: 0;
+}
+
+.settings-body:has([data-settings-page-content="changelog"].active) {
+    padding: 0 24px 24px;
+}
+
+.settings-category[data-settings-page-content="changelog"].active {
+    padding-top: 24px;
 }
 
 .profile-settings-card {
@@ -2663,6 +2672,16 @@ i[data-lucide] {
     gap: 8px;
     color: var(--accent);
     margin-bottom: 4px;
+}
+
+.changelog-content p {
+    margin: 0 0 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.changelog-content p:last-child {
+    margin-bottom: 0;
 }
 
 .settings-category-header i {

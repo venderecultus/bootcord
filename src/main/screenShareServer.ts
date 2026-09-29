@@ -26,29 +26,14 @@ let viewerCleanupInterval: ReturnType<typeof setInterval> | null = null;
 const SCREENSHARE_DIR = path.join(__dirname, 'screen-share');
 const viewerHtml = fs.readFileSync(path.join(SCREENSHARE_DIR, 'viewer.html'), 'utf-8');
 
-export async function startScreenShareServer(sourceId?: string, sourceName?: string): Promise<{ port: number; publicUrl: string }> {
-  if (httpServer && pinggyTunnel) {
-    const urls = await pinggyTunnel.urls();
-    if (urls.length > 0) {
-      return { port: serverPort, publicUrl: urls[0] };
-    }
-  }
-
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootcord-screenshare-'));
-
-  if (!ffmpegPath) {
-    throw new Error('ffmpeg-static binary not found');
-  }
-
+function getCaptureArgs(sourceId?: string, sourceName?: string): string[] {
   const isScreen = sourceId && sourceId.startsWith('screen:');
-  let inputArgs: string[];
-  if (!sourceId || isScreen) {
-    inputArgs = ['-framerate', '30', '-f', 'gdigrab', '-i', 'desktop'];
-  } else if (sourceName) {
-    inputArgs = ['-framerate', '30', '-f', 'gdigrab', '-i', `title=${sourceName}`];
-  } else {
-    inputArgs = ['-framerate', '30', '-f', 'gdigrab', '-i', 'desktop'];
-  }
+  if (!sourceId || isScreen || !sourceName) return ['-framerate', '30', '-f', 'gdigrab', '-i', 'desktop'];
+  return ['-framerate', '30', '-f', 'gdigrab', '-i', `title=${sourceName}`];
+}
+
+function startFfmpeg(directory: string, inputArgs: string[]): void {
+  if (!ffmpegPath) throw new Error('ffmpeg-static binary not found');
 
   const proc = spawn(ffmpegPath, [
     ...inputArgs,
@@ -66,8 +51,8 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
     '-hls_time', '0.5',
     '-hls_list_size', '3',
     '-hls_flags', 'delete_segments+temp_file+independent_segments',
-    '-hls_segment_filename', path.join(tempDir, 'segment_%d.ts'),
-    path.join(tempDir, 'stream.m3u8')
+    '-hls_segment_filename', path.join(directory, 'segment_%d.ts'),
+    path.join(directory, 'stream.m3u8')
   ]) as ChildProcess;
 
   ffmpegProcess = proc;
@@ -80,7 +65,7 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
     console.log(`[FFmpeg] Process exited with code ${code}`);
     ffmpegProcess = null;
     if (code !== 0 && tempDir) {
-      const m3u8Path = path.join(tempDir, 'stream.m3u8');
+      const m3u8Path = path.join(directory, 'stream.m3u8');
       if (!fs.existsSync(m3u8Path)) {
         console.error('[ScreenShare] FFmpeg exited before creating stream.m3u8');
       }
@@ -92,18 +77,20 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
     ffmpegProcess = null;
   });
 
-  app = express();
+}
 
-  app.use('/hls', express.static(tempDir, {
+function createApp(directory: string): express.Application {
+  const serverApp = express();
+  serverApp.use('/hls', express.static(directory, {
     setHeaders: (res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     }
   }));
 
-  app.use(express.static(SCREENSHARE_DIR));
+  serverApp.use(express.static(SCREENSHARE_DIR));
 
-  app.get('/api/viewer-count', (req, res) => {
+  serverApp.get('/api/viewer-count', (_req, res) => {
     const now = Date.now();
     let count = 0;
     for (const ts of activeViewers.values()) {
@@ -112,13 +99,13 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
     res.json({ count });
   });
 
-  app.post('/api/viewer-ping', (req, res) => {
+  serverApp.post('/api/viewer-ping', (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     activeViewers.set(ip, Date.now());
     res.json({ ok: true });
   });
 
-  app.get('/room/:roomId', (req, res) => {
+  serverApp.get('/room/:roomId', (_req, res) => {
     const ogHtml = `
 <meta property="og:title" content="Bootcord Screen Share" />
 <meta property="og:description" content="Live screen share stream" />
@@ -131,6 +118,49 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
     res.send(html);
   });
 
+  return serverApp;
+}
+
+async function startTunnel(): Promise<string> {
+  console.log('[ScreenShare] Starting Pinggy tunnel...');
+  const tunnel = await pinggy.forward({ forwarding: `localhost:${serverPort}` });
+  const urls = await tunnel.urls();
+  const publicUrl = urls[0];
+
+  console.log(`[ScreenShare] Pinggy tunnel created: ${publicUrl}`);
+  pinggyTunnel = tunnel;
+
+  viewerCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, ts] of activeViewers) {
+      if (now - ts > 15000) activeViewers.delete(ip);
+    }
+  }, 10000);
+
+  tunnelHealthInterval = setInterval(async () => {
+    if (!pinggyTunnel || !(await pinggyTunnel.isActive())) {
+      if (tunnelHealthInterval) {
+        clearInterval(tunnelHealthInterval);
+        tunnelHealthInterval = null;
+      }
+      console.log('[ScreenShare] Pinggy tunnel disconnected');
+      pinggyTunnel = null;
+      onTunnelDisconnectCallback?.();
+    }
+  }, 5000);
+
+  return publicUrl;
+}
+
+export async function startScreenShareServer(sourceId?: string, sourceName?: string): Promise<{ port: number; publicUrl: string }> {
+  if (httpServer && pinggyTunnel) {
+    const urls = await pinggyTunnel.urls();
+    if (urls.length > 0) return { port: serverPort, publicUrl: urls[0] };
+  }
+
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootcord-screenshare-'));
+  startFfmpeg(tempDir, getCaptureArgs(sourceId, sourceName));
+  app = createApp(tempDir);
   httpServer = http.createServer(app);
 
   httpServer.on('error', (error) => {
@@ -149,35 +179,7 @@ export async function startScreenShareServer(sourceId?: string, sourceName?: str
       });
     });
 
-    console.log('[ScreenShare] Starting Pinggy tunnel...');
-    const tunnel = await pinggy.forward({ forwarding: `localhost:${serverPort}` });
-    const urls = await tunnel.urls();
-    const publicUrl = urls[0];
-
-    console.log(`[ScreenShare] Pinggy tunnel created: ${publicUrl}`);
-    pinggyTunnel = tunnel;
-
-    viewerCleanupInterval = setInterval(() => {
-      const now = Date.now();
-      for (const [ip, ts] of activeViewers) {
-        if (now - ts > 15000) activeViewers.delete(ip);
-      }
-    }, 10000);
-
-    tunnelHealthInterval = setInterval(async () => {
-      if (!pinggyTunnel || !(await pinggyTunnel.isActive())) {
-        if (tunnelHealthInterval) {
-          clearInterval(tunnelHealthInterval);
-          tunnelHealthInterval = null;
-        }
-        console.log('[ScreenShare] Pinggy tunnel disconnected');
-        pinggyTunnel = null;
-        if (onTunnelDisconnectCallback) {
-          onTunnelDisconnectCallback();
-        }
-      }
-    }, 5000);
-
+    const publicUrl = await startTunnel();
     return { port: serverPort, publicUrl };
 
   } catch (error) {

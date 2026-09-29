@@ -28,7 +28,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     toggleReaction: (channelId, messageId, emoji) => ipcRenderer.invoke('toggle-reaction', channelId, messageId, emoji),
     getCurrentUserId: () => ipcRenderer.invoke('get-current-user-id'),
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    checkForRollback: () => ipcRenderer.invoke('check-for-rollback'),
     downloadUpdate: () => ipcRenderer.invoke('download-update'),
+    downloadRollback: () => ipcRenderer.invoke('download-rollback'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
     onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (_event, version) => callback(version)),
     onUpdateNotAvailable: (callback) => ipcRenderer.on('update-not-available', () => callback()),
@@ -85,5 +87,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setNickname: (guildId, nickname) => ipcRenderer.invoke('set-nickname', guildId, nickname),
     selectImageFile: () => ipcRenderer.invoke('select-image-file'),
     saveProfileImage: (dataUrl, extension) => ipcRenderer.invoke('save-profile-image', dataUrl, extension),
+    editProfileGif: (filePath, width, height, zoom, x, y) => ipcRenderer.invoke('edit-profile-gif', filePath, width, height, zoom, x, y),
 
 });
